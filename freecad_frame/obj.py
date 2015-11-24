@@ -35,13 +35,23 @@ class Beam():
     @property
     def profile(self):
         wires = self.Object.profile.Shape.Wires
-        face = Part.Face(wires)
         # check boundingbox diagonals to get outer shape
-        diagonals = [wire.BoundBox.DiagonalLength for wire in wires]
-        pos = diagonals.index(max(diagonals))
-        # reaordering
-        wires[0] = wires[0].cleaned()
-        wires[1] = wires[1].cleaned()
+        if len(wires) > 1:
+            direction = Part.Face(wires[0]).normalAt(0, 0)
+            for i, wire in enumerate(wires[1:]):
+                diff = Part.Face(wires[0]).normalAt(0, 0) - direction
+                print(diff)
+                if diff.dot(diff) > 0.00000001:
+                    # faces not aligned
+                    print("reverse wire")
+                    wire.reverse()
+
+            diagonals = [wire.BoundBox.DiagonalLength for wire in wires]
+            pos = diagonals.index(max(diagonals))
+            # reaordering
+            external_wire = wires[pos]
+            wires.pop(pos)
+            wires.insert(0, external_wire)
         face = Part.Face(wires)
         return face
 
