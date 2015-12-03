@@ -37,21 +37,19 @@ class Beam():
         wires = self.Object.profile.Shape.Wires
         # check boundingbox diagonals to get outer shape
         if len(wires) > 1:
-            direction = Part.Face(wires[0]).normalAt(0, 0)
-            for i, wire in enumerate(wires[1:]):
-                diff = Part.Face(wires[0]).normalAt(0, 0) - direction
-                print(diff)
-                if diff.dot(diff) > 0.00000001:
-                    # faces not aligned
-                    print("reverse wire")
-                    wire.reverse()
-
             diagonals = [wire.BoundBox.DiagonalLength for wire in wires]
             pos = diagonals.index(max(diagonals))
             # reaordering
             external_wire = wires[pos]
             wires.pop(pos)
             wires.insert(0, external_wire)
+            # check face oriendation
+            orientation = wires[0].Orientation
+            normal = Part.Face(wires[0]).normalAt(0, 0)
+            for wire in wires[1:]:
+                if Part.Face(wire).normalAt(0, 0).dot(normal) < 0:
+                    wire.reverse()
+
         face = Part.Face(wires)
         return face
 
@@ -327,16 +325,18 @@ def sketch_normal(n, normal_info=None):
     else:
         # this is a draft element or something else:
         # no information for the normals of the path
-        if n.x <= n.y:
-            if n.x <= n.z:
+        if abs(n.x) <= abs(n.y):
+            if abs(n.x) <= abs(n.z):
                 a = App.Vector(1, 0, 0)
             else:
                 a = App.Vector(0, 0, 1)
         else:
-            if n.y <= n.z:
+            if abs(n.y) <= abs(n.z):
                 a = App.Vector(0, 1, 0)
             else:
                 a = App.Vector(0, 0, 1)
+        print(n)
+        print(a)
         b = n.cross(a).normalize()
         return b    
 
