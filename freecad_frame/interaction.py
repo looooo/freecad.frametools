@@ -4,13 +4,17 @@ import FreeCADGui as Gui
 import numpy as np
 import Part
 
-from obj import *
+import beamobj
 
 __all__ = [
     "make_beam",
     "make_miter_cut",
     "make_plane_cut",
     "make_shape_cut"]
+
+
+def refresh():
+    reload(beamobj)
 
 class make_beam(object):
 
@@ -48,8 +52,8 @@ class make_beam(object):
                     "SoMouseButtonEvent", self.klick_event)
 
                 a = App.ActiveDocument.addObject("Part::FeaturePython", "beam")
-                Beam(a, self.profile, path_sketch, path_name)
-                ViewProviderBeam(a.ViewObject)
+                beamobj.Beam(a, self.profile, path_sketch, path_name)
+                beamobj.ViewProviderBeam(a.ViewObject)
                 App.ActiveDocument.recompute()
                 App.Console.PrintMessage("end of tube tool\n")
 
@@ -88,15 +92,15 @@ class make_miter_cut(object):
                 self.beam_2 = sel[0]
                 a = App.ActiveDocument.addObject(
                     "Part::FeaturePython", "miter_beam")
-                CBeam(a, self.beam_1)
+                beamobj.CBeam(a, self.beam_1)
                 self.set_miter_cut_obj(a, self.beam_2)
-                ViewProviderCBeam(a.ViewObject)
+                beamobj.ViewProviderCBeam(a.ViewObject)
 
                 a = App.ActiveDocument.addObject(
                     "Part::FeaturePython", "miter_beam")
-                CBeam(a, self.beam_2)
+                beamobj.CBeam(a, self.beam_2)
                 self.set_miter_cut_obj(a, self.beam_1)
-                ViewProviderCBeam(a.ViewObject)
+                beamobj.ViewProviderCBeam(a.ViewObject)
 
                 Gui.Selection.clearSelection()
                 self.view.removeEventCallback(
@@ -148,9 +152,9 @@ class make_plane_cut(object):
 
                 a = App.ActiveDocument.addObject(
                     "Part::FeaturePython", "cut_beam")
-                CBeam(a, self.beam)
+                beamobj.CBeam(a, self.beam)
                 self.set_cut_obj(a, self.cut_beam, self.cut_face)
-                ViewProviderCBeam(a.ViewObject)
+                beamobj.ViewProviderCBeam(a.ViewObject)
                 App.ActiveDocument.recompute()
 
 
@@ -188,9 +192,9 @@ class make_shape_cut(object):
                 self.beam_2 = sel[0]
                 a = App.ActiveDocument.addObject(
                     "Part::FeaturePython", "shape_cut_beam")
-                CBeam(a, self.beam_1)
+                beamobj.CBeam(a, self.beam_1)
                 self.set_cut_obj(a, self.beam_2)
-                ViewProviderCBeam(a.ViewObject)
+                beamobj.ViewProviderCBeam(a.ViewObject)
 
                 Gui.Selection.clearSelection()
                 self.view.removeEventCallback(

@@ -13,7 +13,7 @@ class frame_workbench(Workbench):
     MenuText = "frame and beams"
     ToolTip = "beam"
     Icon = "beam.svg"
-    toolbox = ["Beam", "CutMiter", "CutPlane", "CutShape"]
+    toolbox = ["Beam", "CutMiter", "CutPlane", "CutShape", "Reload"]
 
     def GetClassName(self):
         return "Gui::PythonWorkbench"
@@ -25,6 +25,7 @@ class frame_workbench(Workbench):
         Gui.addCommand('CutMiter', commands.CutMiter())
         Gui.addCommand('CutPlane', commands.CutPlane())
         Gui.addCommand('CutShape', commands.CutShape())
+        Gui.addCommand('Reload', commands.Reload())
         self.appendToolbar("Tools", self.toolbox)
         self.appendMenu("Tools", self.toolbox)
 

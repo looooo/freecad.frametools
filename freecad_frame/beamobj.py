@@ -1,4 +1,5 @@
 from __future__ import division
+import copy
 
 import os
 import numpy as np
@@ -17,7 +18,8 @@ __all__ = [
 
 class Beam():
     def __init__(self, obj, profile, path, path_name):
-        "'''Beam: representing a straight extrusion of a profile'''"
+        '''Beam: representing a straight extrusion of a profile'''
+        print("was soll das")
         obj.addProperty("App::PropertyString", "type", "Beam", "type of the object").type = "beam"
         obj.addProperty("App::PropertyLink","profile","Beam","sketch profile of the beam").profile = profile
         obj.addProperty("App::PropertyLink","path","Beam","path of the beam").path = path
@@ -34,7 +36,10 @@ class Beam():
 
     @property
     def profile(self):
-        wires = self.Object.profile.Shape.Wires
+        if isinstance(self.Object.profile.Shape, Part.Face):
+            # create a copy of the face
+            return Part.Face(self.Object.profile.Shape)
+        wires = copy.copy(self.Object.profile.Shape.Wires)
         # check boundingbox diagonals to get outer shape
         if len(wires) > 1:
             diagonals = [wire.BoundBox.DiagonalLength for wire in wires]
@@ -96,8 +101,16 @@ class Beam():
         rot_mat.A14 = p.x
         rot_mat.A24 = p.y
         rot_mat.A34 = p.z
-
-        rot_mat_2 = self.Object.profile.Placement.toMatrix().inverse()
+        if hasattr(self.Object.profile, "Sources"):
+            translation = self.Object.profile.Sources[0].Placement.Base
+            #translation += self.Object.profile.Placement.Base
+        else:
+            translation = self.Object.profile.Placement.Base
+        print(self.Object.profile.Placement)
+        print(profile.Placement)
+        print(profile.Placement)
+        rot_mat_2 = profile.Placement.toMatrix().inverse()
+        profile.Placement.Base -= translation
         rot_mat_1 = App.Matrix()
         rot_mat_1.rotateZ(np.deg2rad(self.Object.Rotation.Value))
 

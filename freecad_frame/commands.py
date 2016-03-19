@@ -1,7 +1,31 @@
 import FreeCADGui as Gui
 import FreeCAD as App
 from freecad_frame import ICON_PATH
-from freecad_frame._commands import *
+from freecad_frame import interaction
+from types import ModuleType
+
+
+def reload_package(package):
+    assert(hasattr(package, "__package__"))
+    fn = package.__file__
+    fn_dir = os.path.dirname(fn) + os.sep
+    module_visit = {fn}
+    del fn
+
+    def reload_recursive_ex(module):
+        importlib.reload(module)
+
+        for module_child in vars(module).values():
+            if isinstance(module_child, types.ModuleType):
+                fn_child = getattr(module_child, "__file__", None)
+                if (fn_child is not None) and fn_child.startswith(fn_dir):
+                    if fn_child not in module_visit:
+                        # print("reloading:", fn_child, "from", module)
+                        module_visit.add(fn_child)
+                        reload_recursive_ex(module_child)
+
+    return reload_recursive_ex(package)
+
 
 __all__ = [
     "Beam",
@@ -34,7 +58,7 @@ class BaseCommand(object):
 class Beam(BaseCommand):
 
     def Activated(self):
-        make_beam(self.view)
+        interaction.make_beam(self.view)
 
     def GetResources(self):
         return {'Pixmap': ICON_PATH + 'beam.svg', 'MenuText': 'Text', 'ToolTip': 'Text'}
@@ -43,7 +67,7 @@ class Beam(BaseCommand):
 class CutMiter(BaseCommand):
 
     def Activated(self):
-        make_miter_cut(self.view)
+        interaction.make_miter_cut(self.view)
 
     def GetResources(self):
         return {'Pixmap': ICON_PATH + 'beam_miter_cut.svg', 'MenuText': 'miter_cut', 'ToolTip': 'miter_cut'}
@@ -52,7 +76,7 @@ class CutMiter(BaseCommand):
 class CutPlane(BaseCommand):
 
     def Activated(self):
-        make_plane_cut(self.view)
+        interaction.make_plane_cut(self.view)
 
     def GetResources(self):
         return {'Pixmap': ICON_PATH + 'beam_plane_cut.svg', 'MenuText': 'plane_cut', 'ToolTip': 'plane_cut'}
@@ -61,7 +85,16 @@ class CutPlane(BaseCommand):
 class CutShape(BaseCommand):
 
     def Activated(self):
-        make_shape_cut(self.view)
+        interaction.make_shape_cut(self.view)
 
     def GetResources(self):
         return {'Pixmap': ICON_PATH + 'beam_shape_cut.svg', 'MenuText': 'shape_cut', 'ToolTip': 'shape_cut'}
+
+class Reload():
+
+    def Activated(self):
+        reload(interaction)
+        interaction.refresh()
+
+    def GetResources(self):
+        return {'Pixmap': ICON_PATH + 'reload.svg', 'MenuText': 'reload', 'ToolTip': 'reload'}
