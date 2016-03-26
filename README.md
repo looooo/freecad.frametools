@@ -13,10 +13,11 @@ a frame-module for freecad
   * go to Sketcher WB:
     * draw a sketch (profile)
     * draw a second sketch (path)
-  * go to Part WB:
+  * go to Part WB: (this is necesarry for more complex profiles)
     * select the profile
     * create a face from the profile (in top-menu: Part/ Create face from sketch)
   * go to frame WB:
     * select the beam-symbol (1.)
-    * select the profile
+    * select the face (from profile)
     * select the path
+
