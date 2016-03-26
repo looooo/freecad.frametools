@@ -59,7 +59,7 @@ class Beam(BaseCommand):
         interaction.make_beam(self.view)
 
     def GetResources(self):
-        return {'Pixmap': ICON_PATH + 'beam.svg', 'MenuText': 'Text', 'ToolTip': 'Text'}
+        return {'Pixmap': ICON_PATH + 'beam.svg', 'MenuText': 'beam', 'ToolTip': 'beam'}
 
 
 class CutMiter(BaseCommand):
