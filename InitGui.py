@@ -10,7 +10,7 @@ from unique_frame_file import ICON_PATH
 
 Gui.addIconPath(ICON_PATH)
 
-class frame_workbench(Workbench):
+class frame_workbench(Gui.Workbench):
     """frame workbench"""
 
     MenuText = "frame and beams"
