@@ -250,7 +250,7 @@ class CBeam(object):
                [p_1_b, p_2_a],
                [p_1_b, p_2_b]]
 
-        l_arr = map(norm, arr)
+        l_arr = list(map(norm, arr))
         min_val = min(l_arr)
         min_item = l_arr.index(min_val)
 
@@ -263,7 +263,7 @@ class CBeam(object):
 
         # calculating the intersection-point p and face-normal n
         t = n1.cross(n2)
-        np_n1, np_n2, np_t, np_bp1, np_bp2 = map(to_np, [n1, n2, t, bp1, bp2])
+        np_n1, np_n2, np_t, np_bp1, np_bp2 = list(map(to_np, [n1, n2, t, bp1, bp2]))
         np_mat = np.array([np_n1, -np_n2, t])
         np_mat = np_mat.transpose()
         np_rhs = np_bp2 - np_bp1
@@ -287,7 +287,7 @@ class CBeam(object):
         n.normalize()
 
         n_dist = lambda p: abs((p - p_2_a).dot(n))
-        l_arr = map(n_dist, arr)
+        l_arr = list(map(n_dist, arr))
         min_val = min(l_arr)
         min_item = l_arr.index(min_val)
 
