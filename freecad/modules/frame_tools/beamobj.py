@@ -1,13 +1,11 @@
 from __future__ import division
 import copy
 
-import os
 import numpy as np
+from freecad import app
+from freecad import part
 
-import FreeCAD as App
-import Part
-
-from frame_tools import ICON_PATH
+from freecad.modules.frame_tools import ICONPATH
 
 __all__ = [
     "Beam",
@@ -36,9 +34,9 @@ class Beam():
 
     @property
     def profile(self):
-        if isinstance(self.Object.profile.Shape, Part.Face):
+        if isinstance(self.Object.profile.Shape, part.Face):
             # create a copy of the face
-            return Part.Face(self.Object.profile.Shape)
+            return part.Face(self.Object.profile.Shape)
         wires = copy.copy(self.Object.profile.Shape.Wires)
         # check boundingbox diagonals to get outer shape
         if len(wires) > 1:
@@ -50,20 +48,20 @@ class Beam():
             wires.insert(0, external_wire)
             # check face oriendation
             orientation = wires[0].Orientation
-            normal = Part.Face(wires[0]).normalAt(0, 0)
+            normal = part.Face(wires[0]).normalAt(0, 0)
             for wire in wires[1:]:
-                if Part.Face(wire).normalAt(0, 0).dot(normal) < 0:
+                if part.Face(wire).normalAt(0, 0).dot(normal) < 0:
                     wire.reverse()
 
-        face = Part.Face(wires)
+        face = part.Face(wires)
         return face
 
     @property
     def outer_shape(self):
         path, a, b, n = self.path_a_b_n
-        profile = Part.Face(self.profile.Wires[0])
+        profile = part.Face(self.profile.Wires[0])
         new_profile = self.transform_to_n(profile, a - n * self.Object.exdent_1.Value, n)
-        return new_profile.extrude(App.Vector(b - a) + n * (self.Object.exdent_1.Value + self.Object.exdent_2.Value))
+        return new_profile.extrude(app.Vector(b - a) + n * (self.Object.exdent_1.Value + self.Object.exdent_2.Value))
 
     def attach(self, fp):
         print("hi")
@@ -74,7 +72,7 @@ class Beam():
         fp.Proxy.Object = fp
         path, a, b, n = self.path_a_b_n
         new_profile = self.transform_to_n(self.profile, a - n * fp.exdent_1.Value, n)
-        fp.Shape = new_profile.extrude(App.Vector(b - a) + n * (fp.exdent_1.Value + fp.exdent_2.Value))
+        fp.Shape = new_profile.extrude(app.Vector(b - a) + n * (fp.exdent_1.Value + fp.exdent_2.Value))
 
     def transform_to_n(self, profile, p, n):
         '''transform a profile (Shape):
@@ -88,7 +86,7 @@ class Beam():
         v = n.cross(t)
         v.normalize()
 
-        rot_mat = App.Matrix()
+        rot_mat = app.Matrix()
         rot_mat.A11 = t.x
         rot_mat.A21 = t.y
         rot_mat.A31 = t.z
@@ -111,19 +109,19 @@ class Beam():
         print(profile.Placement)
         rot_mat_2 = profile.Placement.toMatrix().inverse()
         profile.Placement.Base -= translation
-        rot_mat_1 = App.Matrix()
+        rot_mat_1 = app.Matrix()
         rot_mat_1.rotateZ(np.deg2rad(self.Object.Rotation.Value))
 
         placement = rot_mat.multiply(rot_mat_1.multiply(rot_mat_2))
-        profile.Placement = App.Placement(placement).multiply(profile.Placement)
+        profile.Placement = app.Placement(placement).multiply(profile.Placement)
 
         return profile
 
     # @property
     # def midpoint(self):
-    #     profile_midpoint = filter(lambda x: isinstance(x, App.Base.Vector), self.Object.profile.Geometry)
+    #     profile_midpoint = filter(lambda x: isinstance(x, app.Base.Vector), self.Object.profile.Geometry)
     #     if len(profile_midpoint) == 0 or profile_midpoint is None:
-    #         profile_midpoint = App.Vector(0, 0, 0)
+    #         profile_midpoint = app.Vector(0, 0, 0)
     #     else:
     #         profile_midpoint = profile_midpoint[0]
     #     return profile_midpoint
@@ -144,12 +142,12 @@ class Beam():
         xmin = bb.XMin - bb.XLength * fac
         ymax = bb.YMax + bb.YLength * fac
         ymin = bb.YMin - bb.YLength * fac
-        pol = Part.makePolygon(
-            [App.Vector(xmax, ymax, 0),
-             App.Vector(xmax, ymin, 0),
-             App.Vector(xmin, ymin, 0),
-             App.Vector(xmin, ymax, 0),
-             App.Vector(xmax, ymax, 0)])
+        pol = part.makePolygon(
+            [app.Vector(xmax, ymax, 0),
+             app.Vector(xmax, ymin, 0),
+             app.Vector(xmin, ymin, 0),
+             app.Vector(xmin, ymax, 0),
+             app.Vector(xmax, ymax, 0)])
         path, a, b, n = self.path_a_b_n
         return self.transform_to_n(pol, a, n)
 
@@ -159,7 +157,7 @@ class Beam():
         path, a, b, n = self.path_a_b_n
         projected = [project_to_plane(plane_p, plane_n, v, n) for v in vectors]
         projected.append(projected[0])
-        pol = Part.makePolygon(projected)
+        pol = part.makePolygon(projected)
         return pol
 
     def __getstate__(self):
@@ -273,7 +271,7 @@ class CBeam(object):
         p = bp1 + n1 * l1 + t * l3 * 0.5
 
         pol = top_beam_1.Proxy.project_profile_bound_box(n, p)
-        face = Part.Face(pol.Wires)
+        face = part.Face(pol.Wires)
         solid = face.extrude(n1 * 100)
         return self.Object.this_beam.Shape.cut(solid)
 
@@ -298,7 +296,7 @@ class CBeam(object):
 
         p = face.CenterOfMass
         pol = top_beam_1.Proxy.project_profile_bound_box(n, p)
-        face = Part.Face(pol.Wires)
+        face = part.Face(pol.Wires)
         solid = face.extrude(n1 * 100)
         return self.Object.this_beam.Shape.cut(solid)
 
@@ -324,7 +322,7 @@ class ViewProviderCBeam(ViewProviderBeam):
         return [self.vobj.Object.this_beam]
 
     def getIcon(self):
-        return(ICON_PATH + "beam.svg")
+        return(ICONPATH + "beam.svg")
 
 
 def norm(p):
@@ -333,23 +331,21 @@ def norm(p):
 
 def sketch_normal(n, normal_info=None):
     if normal_info.TypeId == 'Sketcher::SketchObject':
-        b = App.Vector(0, 0, 1)
+        b = app.Vector(0, 0, 1)
         return normal_info.Placement.Rotation.multVec(b)
     else:
         # this is a draft element or something else:
         # no information for the normals of the path
         if abs(n.x) <= abs(n.y):
             if abs(n.x) <= abs(n.z):
-                a = App.Vector(1, 0, 0)
+                a = app.Vector(1, 0, 0)
             else:
-                a = App.Vector(0, 0, 1)
+                a = app.Vector(0, 0, 1)
         else:
             if abs(n.y) <= abs(n.z):
-                a = App.Vector(0, 1, 0)
+                a = app.Vector(0, 1, 0)
             else:
-                a = App.Vector(0, 0, 1)
-        print(n)
-        print(a)
+                a = app.Vector(0, 0, 1)
         b = n.cross(a).normalize()
         return b    
 
