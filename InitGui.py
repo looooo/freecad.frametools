@@ -11,16 +11,16 @@ from unique_frame_file import ICON_PATH
 Gui.addIconPath(ICON_PATH)
 
 class frame_workbench(Gui.Workbench):
-    """frame workbench"""
+    '''frame workbench'''
 
-    MenuText = "frame and beams"
-    ToolTip = "beam"
-    Icon = "beam.svg"
-    toolbox = ["Beam", "CutMiter", "CutPlane", "CutShape", "Reload"]
-    boxbox = ["LinkedFace", "ExtrudedFace"]
+    MenuText = 'frame and beams'
+    ToolTip = 'beam'
+    Icon = 'beam.svg'
+    toolbox = ['Beam', 'CutMiter', 'CutPlane', 'CutShape', 'Reload']
+    boxbox = ['LinkedFace', 'ExtrudedFace', 'FlatFace']
 
     def GetClassName(self):
-        return "Gui::PythonWorkbench"
+        return 'Gui::PythonWorkbench'
 
     def Initialize(self):
 
@@ -32,10 +32,12 @@ class frame_workbench(Gui.Workbench):
         Gui.addCommand('Reload', commands.Reload())
         Gui.addCommand('LinkedFace', commands.LinkedFace())
         Gui.addCommand('ExtrudedFace', commands.ExtrudedFace())
-        self.appendToolbar("Frame", self.toolbox)
-        self.appendMenu("Frame", self.toolbox)
-        self.appendToolbar("Box", self.boxbox)
-        self.appendMenu("Box", self.boxbox)
+        Gui.addCommand('FlatFace', commands.FlatFace())
+
+        self.appendToolbar('Frame', self.toolbox)
+        self.appendMenu('Frame', self.toolbox)
+        self.appendToolbar('Box', self.boxbox)
+        self.appendMenu('Box', self.boxbox)
 
     def Activated(self):
         pass

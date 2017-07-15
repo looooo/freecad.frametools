@@ -4,7 +4,7 @@ from frame_tools import ICON_PATH, interaction, boxtools
 
 
 def reload_package(package):
-    assert(hasattr(package, "__package__"))
+    assert(hasattr(package, '__package__'))
     fn = package.__file__
     fn_dir = os.path.dirname(fn) + os.sep
     module_visit = {fn}
@@ -15,7 +15,7 @@ def reload_package(package):
 
         for module_child in vars(module).values():
             if isinstance(module_child, types.ModuleType):
-                fn_child = getattr(module_child, "__file__", None)
+                fn_child = getattr(module_child, '__file__', None)
                 if (fn_child is not None) and fn_child.startswith(fn_dir):
                     if fn_child not in module_visit:
                         # print("reloading:", fn_child, "from", module)
@@ -105,6 +105,15 @@ class ExtrudedFace(BaseCommand):
 
     def GetResources(self):
         return {'Pixmap': ICON_PATH + 'extruded_face.svg', 'MenuText': 'extruded_face', 'ToolTip': 'extruded_face'}
+
+
+class FlatFace(BaseCommand):
+
+    def Activated(self):
+        boxtools.create_flat_face()
+
+    def GetResources(self):
+        return {'Pixmap': ICON_PATH + 'linked_face.svg', 'MenuText': 'flat_face', 'ToolTip': 'flat_face'}
 
 
 class Reload():
