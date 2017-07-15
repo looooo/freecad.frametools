@@ -1,6 +1,6 @@
 import FreeCADGui as Gui
 import FreeCAD as App
-from frame_tools import ICON_PATH, interaction
+from frame_tools import ICON_PATH, interaction, boxtools
 
 
 def reload_package(package):
@@ -87,6 +87,25 @@ class CutShape(BaseCommand):
 
     def GetResources(self):
         return {'Pixmap': ICON_PATH + 'beam_shape_cut.svg', 'MenuText': 'shape_cut', 'ToolTip': 'shape_cut'}
+
+
+class LinkedFace(BaseCommand):
+
+    def Activated(self):
+        boxtools.create_linked_face()
+
+    def GetResources(self):
+        return {'Pixmap': ICON_PATH + 'linked_face.svg', 'MenuText': 'linked_face', 'ToolTip': 'linked_face'}
+
+
+class ExtrudedFace(BaseCommand):
+
+    def Activated(self):
+        boxtools.create_extruded_face()
+
+    def GetResources(self):
+        return {'Pixmap': ICON_PATH + 'extruded_face.svg', 'MenuText': 'extruded_face', 'ToolTip': 'extruded_face'}
+
 
 class Reload():
 

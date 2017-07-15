@@ -17,6 +17,7 @@ class frame_workbench(Gui.Workbench):
     ToolTip = "beam"
     Icon = "beam.svg"
     toolbox = ["Beam", "CutMiter", "CutPlane", "CutShape", "Reload"]
+    boxbox = ["LinkedFace", "ExtrudedFace"]
 
     def GetClassName(self):
         return "Gui::PythonWorkbench"
@@ -29,8 +30,12 @@ class frame_workbench(Gui.Workbench):
         Gui.addCommand('CutPlane', commands.CutPlane())
         Gui.addCommand('CutShape', commands.CutShape())
         Gui.addCommand('Reload', commands.Reload())
-        self.appendToolbar("Tools", self.toolbox)
-        self.appendMenu("Tools", self.toolbox)
+        Gui.addCommand('LinkedFace', commands.LinkedFace())
+        Gui.addCommand('ExtrudedFace', commands.ExtrudedFace())
+        self.appendToolbar("Frame", self.toolbox)
+        self.appendMenu("Frame", self.toolbox)
+        self.appendToolbar("Box", self.boxbox)
+        self.appendMenu("Box", self.boxbox)
 
     def Activated(self):
         pass
