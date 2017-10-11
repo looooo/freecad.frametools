@@ -51,11 +51,13 @@ class Beam():
             # check face oriendation
             orientation = wires[0].Orientation
             normal = Part.Face(wires[0]).normalAt(0, 0)
+            wires_copy = [wires[0]]
             for wire in wires[1:]:
-                if Part.Face(wire).normalAt(0, 0).dot(normal) < 0:
-                    wire.reverse()
-
-        face = Part.Face(wires)
+                fi = Part.Face(wire)
+                if fi.normalAt(0, 0).dot(normal) > 0:
+                    fi.reverse()
+                wires_copy.append(fi.Wires[0])
+        face = Part.Face(wires_copy)
         return face
 
     @property
