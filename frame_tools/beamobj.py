@@ -39,7 +39,7 @@ class Beam():
         if isinstance(self.Object.profile.Shape, Part.Face):
             # create a copy of the face
             return Part.Face(self.Object.profile.Shape)
-        wires = copy.copy(self.Object.profile.Shape.Wires)
+        wires_copy = wires = copy.copy(self.Object.profile.Shape.Wires)
         # check boundingbox diagonals to get outer shape
         if len(wires) > 1:
             diagonals = [wire.BoundBox.DiagonalLength for wire in wires]
