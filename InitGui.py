@@ -33,6 +33,7 @@ class frame_workbench(Gui.Workbench):
         Gui.addCommand('LinkedFace', commands.LinkedFace())
         Gui.addCommand('ExtrudedFace', commands.ExtrudedFace())
         Gui.addCommand('FlatFace', commands.FlatFace())
+        Gui.addCommand('FlatFace', commands.NurbsConnection())
 
         self.appendToolbar('Frame', self.toolbox)
         self.appendMenu('Frame', self.toolbox)

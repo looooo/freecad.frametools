@@ -1,6 +1,6 @@
 import FreeCADGui as Gui
 import FreeCAD as App
-from frame_tools import ICON_PATH, interaction, boxtools
+from frame_tools import ICON_PATH, interaction, boxtools, bspline_tools
 
 
 def reload_package(package):
@@ -114,6 +114,15 @@ class FlatFace(BaseCommand):
 
     def GetResources(self):
         return {'Pixmap': ICON_PATH + 'linked_face.svg', 'MenuText': 'flat_face', 'ToolTip': 'flat_face'}
+
+
+class NurbsConnection(BaseCommand):
+
+    def Activated(self):
+        bspline_tools.make_nurbs_connection()
+
+    def GetResources(self):
+        return {'Pixmap': ICON_PATH + 'nurbs_connect.svg', 'MenuText': 'nurbs_connect', 'ToolTip': 'nurbs_connect'}
 
 
 class Reload():
