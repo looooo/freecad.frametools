@@ -1,7 +1,10 @@
 import numpy as np
-from scipy.optimize import least_squares
 import Part
 import FreeCADGui as Gui
+try:
+    from scipy.optimize import least_squares
+except:
+    least_squares = None
 
 
 def curve_between_lines(p0, p1, v0, v1, n=None):
@@ -37,7 +40,8 @@ def curve_between_lines(p0, p1, v0, v1, n=None):
             bs.setWeight(i + 1, wi)
         dist = (np.array(bs.discretize(100)) - center) / r
         return sum((np.linalg.norm(dist, axis=1) - 1)**2)
-    w0, t00 = least_squares(min_function, [w0, t00]).x
+    if not least_squares is None:
+        w0, t00 = least_squares(min_function, [w0, t00]).x
     t0 = t00 * abs(s0)
     t1 = t00 * abs(s1)
     weights = np.array([1, w0, w0, 1])
