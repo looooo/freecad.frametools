@@ -7,7 +7,7 @@ import numpy as np
 import FreeCAD as App
 import Part
 
-from freecad.frametool import ICON_PATH
+from freecad.frametools import ICON_PATH
 
 __all__ = [
     "Beam",

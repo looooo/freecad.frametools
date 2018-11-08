@@ -2,7 +2,7 @@ import os
 
 import FreeCADGui as Gui
 import FreeCAD as App
-from freecad.frametool import ICON_PATH
+from freecad.frametools import ICON_PATH
 from . import interaction, boxtools, bspline_tools
 
 

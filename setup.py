@@ -2,7 +2,7 @@ from setuptools import setup
 import sys, os
 
 version_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 
-                            "freecad", "frametools", "__version__.py")
+                            "freecad", "frametools", "version.py")
 with open(version_path) as fp:
     exec(fp.read())
 

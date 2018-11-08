@@ -5,7 +5,7 @@ except ImportError:
     print("module not loaded with freecad")
 
 import os
-from freecad.frametool import ICON_PATH
+from freecad.frametools import ICON_PATH
 
 class frame_workbench(Gui.Workbench):
     '''frame workbench'''
@@ -21,7 +21,7 @@ class frame_workbench(Gui.Workbench):
 
     def Initialize(self):
 
-        from freecad.frametool import commands
+        from freecad.frametools import commands
         Gui.addCommand('Beam', commands.Beam())
         Gui.addCommand('CutMiter', commands.CutMiter())
         Gui.addCommand('CutPlane', commands.CutPlane())
