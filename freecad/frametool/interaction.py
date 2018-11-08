@@ -4,7 +4,7 @@ import FreeCADGui as Gui
 import numpy as np
 import Part
 
-from frame_tools import beamobj
+from . import beamobj
 
 __all__ = [
     "make_beam",
