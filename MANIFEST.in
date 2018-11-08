@@ -1,1 +1,1 @@
-recursive-include freecad/frametools/icons
+recursive-include freecad/frametools/icons *
