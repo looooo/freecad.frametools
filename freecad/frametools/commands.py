@@ -6,28 +6,6 @@ from freecad.frametools import ICON_PATH
 from . import interaction, boxtools, bspline_tools
 
 
-def reload_package(package):
-    assert(hasattr(package, '__package__'))
-    fn = package.__file__
-    fn_dir = os.path.dirname(fn) + os.sep
-    module_visit = {fn}
-    del fn
-
-    def reload_recursive_ex(module):
-        importlib.reload(module)
-
-        for module_child in vars(module).values():
-            if isinstance(module_child, types.ModuleType):
-                fn_child = getattr(module_child, '__file__', None)
-                if (fn_child is not None) and fn_child.startswith(fn_dir):
-                    if fn_child not in module_visit:
-                        # print("reloading:", fn_child, "from", module)
-                        module_visit.add(fn_child)
-                        reload_recursive_ex(module_child)
-
-    return reload_recursive_ex(package)
-
-
 __all__ = [
     "Beam",
     "CutMiter",
@@ -128,11 +106,34 @@ class NurbsConnection(BaseCommand):
         return {'Pixmap': os.path.join(ICON_PATH, 'nurbs_connect.svg'), 'MenuText': 'nurbs_connect', 'ToolTip': 'nurbs_connect'}
 
 
-class Reload():
+class FemSolver(BaseCommand):
 
     def Activated(self):
-        reload(interaction)
-        interaction.refresh()
+        bspline_tools.make_fem_solver()
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(ICON_PATH, 'reload.svg'), 'MenuText': 'reload', 'ToolTip': 'reload'}
+        return {'Pixmap': os.path.join(ICON_PATH, 'fem_solver.svg'), 'MenuText': 'fem_solver', 'ToolTip': 'fem_solver'}
+
+
+class Reload():
+    NOT_RELOAD = ["freecad.frametools.init_gui"]
+    RELOAD = ["freecad.frametools"]
+    def GetResources(self):
+        return {'Pixmap': 'refresh_command.svg', 'MenuText': 'Refresh', 'ToolTip': 'Refresh'}
+
+    def IsActive(self):
+        return True
+
+    def Activated(self):
+        try:
+            from importlib import reload
+        except ImportError:
+            pass # this is python2
+        import sys
+        for name, mod in sys.modules.items():
+            for rld in self.RELOAD:
+                if rld in name:
+                    if mod and name not in self.NOT_RELOAD:
+                        print('reload {}'.format(name))
+                        reload(mod)
+        from pivy import coin
