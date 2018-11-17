@@ -57,6 +57,8 @@ class ViewProviderGenericSolver(object):
         action.triggered.connect(self.solve)
         action = menu.addAction("show_result")
         action.triggered.connect(self.show_result)
+        action = menu.addAction("edge_min_value")
+        action.triggered.connect(self.edge_min_value)
 
     def edit_dict(self):
         Gui.Control.showDialog(PropertyEditor(self.obj))
@@ -85,6 +87,11 @@ class ViewProviderGenericSolver(object):
         ax.set_aspect('equal')
         # fig.fig.colorbar()
         fig.show()
+
+    def edge_min_value(self):
+        message_box = QtGui.QMessageBox()
+        message_box.setText(self.obj.Proxy.edge_min_value())
+        message_box.exec_()
 
     def attach(self, view_obj):
         self.view_obj = view_obj
@@ -242,6 +249,20 @@ class GenericSolver():
 
     def __setstate__(self, state):
         return None
+
+    def edge_min_value(self):
+        output = ""
+        for name, entities in self.n2e.items():
+            nodes = []
+            for entity in entities:
+                if "Edge" in entity:
+                    nodes += list(self.obj.mesh_obj.FemMesh.getNodesByEdge(
+                                    self.obj.geo_obj.Shape.getElement(entity)))
+            nodes = list(set(nodes))
+            if nodes:
+                output += "min value of " + name + "= {0:.3f} °C".format(min(self.t[nodes]))
+                output += "\n"
+        return output
 
 def make_GenericSolver(geo_obj, mesh_obj):
     obj = App.ActiveDocument.addObject("App::FeaturePython", "generic_solver")
