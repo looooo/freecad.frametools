@@ -14,7 +14,7 @@ class frame_workbench(Gui.Workbench):
     ToolTip = 'beam'
     Icon = os.path.join(ICON_PATH, 'beam.svg')
     toolbox = ['Beam', 'CutMiter', 'CutPlane', 'CutShape', 'Reload']
-    boxbox = ['LinkedFace', 'ExtrudedFace', 'FlatFace']
+    boxbox = ['LinkedFace', 'ExtrudedFace', 'FlatFace', 'FemSolver']
 
     def GetClassName(self):
         return 'Gui::PythonWorkbench'
@@ -31,6 +31,7 @@ class frame_workbench(Gui.Workbench):
         Gui.addCommand('ExtrudedFace', commands.ExtrudedFace())
         Gui.addCommand('FlatFace', commands.FlatFace())
         Gui.addCommand('FlatFace', commands.NurbsConnection())
+        Gui.addCommand('FemSolver', commands.FemSolver())
 
         self.appendToolbar('Frame', self.toolbox)
         self.appendMenu('Frame', self.toolbox)

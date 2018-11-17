@@ -1,42 +1,125 @@
-# 1 create names to entities mapping
-# 2 create names to (types, values) mapping
-
+from PySide import QtGui, QtCore
 import FreeCADGui as Gui
 import FreeCAD as App
 import numpy as np
 from scipy import sparse
 from scipy.sparse import linalg
+from freecad.frametools import ICON_PATH
+import os
+import yaml
 
+class PropertyEditor(object):
+    widget_name = 'properties editor'
+
+    def __init__(self, obj):
+        self.obj = obj
+        self.form = []
+        self.base_widget = QtGui.QWidget()
+        self.form.append(self.base_widget)
+        self.base_widget.setWindowTitle(self.widget_name)
+        self.base_widget.setLayout(QtGui.QVBoxLayout())
+        self.plain_text = QtGui.QPlainTextEdit()
+        self.plain_text.setTabStopWidth(30)
+        self.plain_text.document().setPlainText(yaml.dump(self.obj.parameter_dict))
+        self.addRefButton = QtGui.QPushButton("add entities")
+        self.addRefButton.clicked.connect(self.add_entities)
+        self.base_widget.layout().addWidget(self.addRefButton)
+        self.base_widget.layout().addWidget(self.plain_text)
+
+    def accept(self):
+        try:
+            self.obj.parameter_dict = yaml.load(self.plain_text.document().toPlainText())
+        except Exception as e:
+            print(e)
+            return
+        else:
+            Gui.Control.closeDialog()
+
+    def reject(self):
+        Gui.Control.closeDialog()
+
+    def add_entities(self):
+        sel = Gui.Selection.getSelectionEx()[0]
+        for i, name in enumerate(sel.SubElementNames):
+            if i != 0:
+                self.plain_text.insertPlainText(", ")
+            self.plain_text.insertPlainText(name)
+
+class ViewProviderGenericSolver(object):
+    def __init__(self, obj):
+        obj.Proxy = self
+        self.obj = obj.Object
+
+    def setupContextMenu(self, obj, menu):
+        action = menu.addAction("edit parameters")
+        action.triggered.connect(self.edit_dict)
+        action = menu.addAction("solve")
+        action.triggered.connect(self.solve)
+        action = menu.addAction("show_result")
+        action.triggered.connect(self.show_result)
+
+    def edit_dict(self):
+        Gui.Control.showDialog(PropertyEditor(self.obj))
+
+    def solve(self):
+        self.obj.Proxy.solve()
+
+    def getIcon(self):
+        return os.path.join(ICON_PATH, "generic_solver.svg")
+
+    def show_result(self):
+        tris = []
+        for domain in self.obj.Proxy.lambda_domains: 
+            tris += np.array(self.obj.Proxy.n2elements[domain]).tolist()
+
+        from freecad.plot import Plot
+        from matplotlib import pyplot as plt
+        import matplotlib.cm as cm
+        fig = Plot.figure()
+        fig.fig.add_axes()
+        ax = fig.fig.axes[0]
+        ax.tricontourf(self.obj.Proxy.nodes[:, 0],
+                        self.obj.Proxy.nodes[:, 1], 
+                        tris, self.obj.Proxy.t, levels=100, cmap=cm.coolwarm)
+        ax.grid()
+        ax.set_aspect('equal')
+        # fig.fig.colorbar()
+        fig.show()
+
+    def attach(self, view_obj):
+        self.view_obj = view_obj
+        self.obj = view_obj.Object
+
+    def __getstate__(self):
+        pass
+
+    def __setstate__(self, state):
+        pass
 
 class GenericSolver():
-    def __init__(self, obj, geo_obj, mesh_obj, n2e=None, n2tnv=None):
+    def __init__(self, obj, geo_obj, mesh_obj):
         '''A generic solver class for FEM-analysis'''
         obj.Proxy = self
         obj.addProperty("App::PropertyLink","geo_obj","Link","A shape object").geo_obj = geo_obj
         obj.addProperty("App::PropertyLink","mesh_obj","Link","A mesh object").mesh_obj = mesh_obj
+        obj.addProperty('App::PropertyPythonObject', 'parameter_dict', 'parameters', 'parameters as dict')
         self.obj = obj
-        self.n2e = n2e or {}
-        self.n2tnv = n2tnv or {}
+        self.init_parameters()
 
-    def add_name(self, name, entities):
-        if name not in self.n2e:
-            self.n2e[name] = []
-        self.n2e[name] += entities
+    @property
+    def n2e(self):
+        return self.obj.parameter_dict["entities"]
 
-    def add_typenvalues(self, name, typenvalues):
-        if name not in self.n2tnv:
-            self.n2tnv[name] = {}
-        self.n2e[name].update(typenvalues)
+    @property
+    def n2tnv(self):
+        return self.obj.parameter_dict["properties"]
 
-    def i_add_name(self, name):
-        sel = Gui.Selection.getSelectionEx()[0]
-        assert sel.Object == self.geo_obj
-        entities = list(sel.SubElementNames)
-        assert entities
-        self.add_name(name, entities)
-
+    def init_parameters(self):
+        self.obj.parameter_dict = {"entities": {"name": ["entity1", "entity2"]}, 
+                                   "properties": {"name": {"type1": "value1", "type2": "value2"}}}
+                                   
     def solve(self):
-        lambda_domains = [name for name, prop in self.n2tnv.items() if "lambda" in prop]
+        self.lambda_domains = [name for name, prop in self.n2tnv.items() if "lambda" in prop]
         dirichlet_domains = [name for name, prop in self.n2tnv.items() if ("T" in prop and not "R" in prop)]
         neumann_domains = [name for name, prop in self.n2tnv.items() if "q" in prop]
         mixed_domains = [name for name, prop in self.n2tnv.items() if ("T" in prop and "R" in prop)]
@@ -56,7 +139,7 @@ class GenericSolver():
 
         ## creating the matrix of the diffusion-matrix
         mat_entries = []
-        for name in lambda_domains:
+        for name in self.lambda_domains:
             lam = self.n2tnv[name]["lambda"]
             for element in self.n2elements[name]:
                 mat_entries += self.diffuseTerm(element, lam)
@@ -65,7 +148,7 @@ class GenericSolver():
         for name in neumann_domains:
             q = self.n2tnv[name]["q"]
             for element in self.n2elements[name]:
-                neumann_entries += self.neumann_Term(element, q)
+                neumann_entries += self.neumannTerm(element, q)
 
         for name in mixed_domains:
             T = self.n2tnv[name]["T"]
@@ -90,21 +173,21 @@ class GenericSolver():
         row_indices = np.int64(row_indices)
         col_indices = np.int64(col_indices)
         mat = sparse.csr_matrix((values, (row_indices, col_indices)))
+        rhs = sparse.csr_matrix((len(self.nodes), 1))
 
         # now we have to delete all matrix entries which are on the dirichlet boundary
-
         # a diagonal matrix to delete all the entries on bc_d data
-        d_mod_indices = list(set(dirichlet_indices))
-        bc_d_mat_1 = sparse.csr_matrix(([1] * len(d_mod_indices), (d_mod_indices, d_mod_indices)), 
-                                        shape=(len(self.nodes), len(self.nodes)))
-        bc_d_mat_2 = sparse.csr_matrix(([1] * len(dirichlet_indices), (dirichlet_indices, dirichlet_indices)), 
-                                        shape=(len(self.nodes), len(self.nodes)))
-        dia_mat = sparse.dia_matrix(([1] * len(self.nodes), 0), 
-                                        shape=(len(self.nodes), len(self.nodes)))
-        
-        mat = (dia_mat - bc_d_mat_1) @ mat + bc_d_mat_2
-        rhs = sparse.csr_matrix((len(self.nodes), 1))
+
         if dirichlet_data and dirichlet_indices:
+            d_mod_indices = list(set(dirichlet_indices))
+            bc_d_mat_1 = sparse.csr_matrix(([1] * len(d_mod_indices), (d_mod_indices, d_mod_indices)), 
+                                            shape=(len(self.nodes), len(self.nodes)))
+            bc_d_mat_2 = sparse.csr_matrix(([1] * len(dirichlet_indices), (dirichlet_indices, dirichlet_indices)), 
+                                            shape=(len(self.nodes), len(self.nodes)))
+            dia_mat = sparse.dia_matrix(([1] * len(self.nodes), 0), 
+                                            shape=(len(self.nodes), len(self.nodes)))
+            mat = (dia_mat - bc_d_mat_1) @ mat + bc_d_mat_2
+
             rhs += sparse.csr_matrix((dirichlet_data, (dirichlet_indices, [0] * len(dirichlet_indices))),
                                     shape=(len(self.nodes), 1))
         if neumann_entries:
@@ -112,9 +195,7 @@ class GenericSolver():
             neumann_indices = np.int64(neumann_indices)
             rhs += sparse.csr_matrix((neumann_data, (neumann_indices, [0] * len(neumann_indices))),
                                       shape=(len(self.nodes), 1))
-        # TODO add rhs_q and rhs_r
-
-        return linalg.spsolve(mat, rhs)
+        self.t = linalg.spsolve(mat, rhs)
 
     def diffuseTerm(self, element, lam):
         BTB = self.get_BTB(element)
@@ -143,98 +224,28 @@ class GenericSolver():
 
     def get_BTB(self, element):
         x1, y1, x2, y2, x3, y3 = self.nodes[element].flatten()
-        y12 = y2 - y1
-        y23 = y3 - y2
-        y31 = y1 - y3
-        x12 = x2 - x1
-        x23 = x3 - x2
-        x31 = x1 - x3
+        y12 = y2 - y1; y23 = y3 - y2; y31 = y1 - y3
+        x12 = x2 - x1; x23 = x3 - x2; x31 = x1 - x3
         area = 0.5 * abs(x12 * y31 - x31 * y12)
-        B = np.array([
-            [-y23, -y31, -y12],
-            [ x23,  x31,  x12]]) / (2 * area)
+        B = np.array([[-y23, -y31, -y12],
+                      [ x23,  x31,  x12]]) / (2 * area)
         return area * B.T @ B
 
     def get_row_indices(self, element):
         return  np.array([element] * len(element))
 
+    def onDocumentRestored(self, obj):
+        self.obj = obj
 
-def make_GenericSolver(geo_obj, mesh_obj, n2e, n2tnv):
-    obj = App.ActiveDocument.addObject("Part::FeaturePython", "generic_solver")
-    GenericSolver(obj, geo_obj, mesh_obj, n2e, n2tnv)
-    # obj.ViewObject = 0
+    def __getstate__(self):
+        return None
+
+    def __setstate__(self, state):
+        return None
+
+def make_GenericSolver(geo_obj, mesh_obj):
+    obj = App.ActiveDocument.addObject("App::FeaturePython", "generic_solver")
+    GenericSolver(obj, geo_obj, mesh_obj)
+    ViewProviderGenericSolver(obj.ViewObject)
     App.ActiveDocument.recompute()
     return obj
-
-def entity_prefix(prefix, numbers):
-    return [prefix + str(i) for i in numbers]
-
-def test():
-    geo_obj = App.ActiveDocument.Fusion
-    mesh_obj = App.ActiveDocument.FEMMeshNetgen
-    n2e = {
-        "hot": entity_prefix("Edge", [9, 3, 2, 8]),
-        "cold": entity_prefix("Edge", [5, 6]),
-        "material1": entity_prefix("Face", [1]),
-        "material2": entity_prefix("Face", [2])
-    }
-    n2tnv = {
-        "hot": {"T": 22., "R": 10.},
-        "cold": {"T": 0.},
-        "material1": {"lambda": 0.1},
-        "material2": {"lambda": 2.3}
-    }
-    gs = make_GenericSolver(geo_obj, mesh_obj, n2e, n2tnv)
-    t = gs.Proxy.solve()
-    print(max(t))
-    import matplotlib.pyplot as plt
-
-    tris = np.array(gs.Proxy.n2elements["material1"]).tolist()
-    tris += np.array(gs.Proxy.n2elements["material2"]).tolist()
-
-    plt.tricontourf(gs.Proxy.nodes[:, 0],
-                    gs.Proxy.nodes[:, 1], 
-                    tris, t, levels=20)
-    plt.colorbar()
-    plt.show()
-
-def test1():
-    geo_obj = App.ActiveDocument.Fusion
-    mesh_obj = App.ActiveDocument.FEMMeshNetgen
-    n2e = {
-        "hot": entity_prefix("Edge", [4]),
-        "cold": entity_prefix("Edge", [6]),
-        "material1": entity_prefix("Face", [1]),
-        "material2": entity_prefix("Face", [2])
-    }
-    n2tnv = {
-        "hot": {"T": 22.},
-        "cold": {"T": 0., "R": 1.},
-        "material1": {"lambda": 3.},
-        "material2": {"lambda": 1.}
-    }
-    gs = make_GenericSolver(geo_obj, mesh_obj, n2e, n2tnv)
-    t = gs.Proxy.solve()
-    print(max(t))
-    import matplotlib.pyplot as plt
-
-    axes1 = plt.subplot(211)
-
-    tris = np.array(gs.Proxy.n2elements["material1"]).tolist()
-    tris += np.array(gs.Proxy.n2elements["material2"]).tolist()
-    plt.tricontourf(gs.Proxy.nodes[:, 0],
-                    gs.Proxy.nodes[:, 1], 
-                    tris, t, levels=20)
-    x = gs.Proxy.nodes[:, 0]
-    order = np.argsort(x)
-    ordered_x = x[order].tolist()
-    ordered_t = t[order].tolist()
-    ordered_x = np.array([-1., 0.] + ordered_x + [6., 7.])
-    ordered_t = np.array([22., 22.] + ordered_t + [0., 0.])
-
-    axes2 = plt.subplot(212, sharex=axes1)
-    plt.plot(ordered_x, ordered_t)
-    axes2.set_xlabel('x[m]')
-    axes2.set_ylabel('T[°C]')
-    plt.grid()
-    plt.show()

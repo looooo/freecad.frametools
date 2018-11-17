@@ -4,6 +4,7 @@ import FreeCADGui as Gui
 import FreeCAD as App
 from freecad.frametools import ICON_PATH
 from . import interaction, boxtools, bspline_tools
+from . import fem2d
 
 
 __all__ = [
@@ -109,10 +110,12 @@ class NurbsConnection(BaseCommand):
 class FemSolver(BaseCommand):
 
     def Activated(self):
-        bspline_tools.make_fem_solver()
+        sel = Gui.Selection.getSelection()
+        fem2d.make_GenericSolver(sel[0], sel[1])
+        App.ActiveDocument.recompute()
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(ICON_PATH, 'fem_solver.svg'), 'MenuText': 'fem_solver', 'ToolTip': 'fem_solver'}
+        return {'Pixmap': os.path.join(ICON_PATH, "generic_solver.svg"), 'MenuText': 'fem_solver', 'ToolTip': 'fem_solver'}
 
 
 class Reload():
