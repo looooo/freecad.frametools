@@ -3,7 +3,7 @@ A frame-module for FreeCAD
 
 ## Requirements
 * FreeCAD >= v0.16
-* scipyunselecgt
+* scipy v?? <----
 
 ## Installation
 ### Automatic Installation
