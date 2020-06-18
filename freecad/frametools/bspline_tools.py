@@ -1,6 +1,6 @@
 import numpy as np
 import Part
-import FreeCADGui as Gui
+import FreeCADGui as gui
 try:
     from scipy.optimize import least_squares
 except:
@@ -54,10 +54,10 @@ def curve_between_lines(p0, p1, v0, v1, n=None):
 
 
 def make_nurbs_connection():
-    edge1 = Gui.Selection.getSelectionEx()[0].SubObjects[0]
-    edge2 = Gui.Selection.getSelectionEx()[1].SubObjects[0]
+    edge1 = gui.Selection.getSelectionEx()[0].SubObjects[0]
+    edge2 = gui.Selection.getSelectionEx()[1].SubObjects[0]
     try:
-        normal = Gui.Selection.getSelectionEx()[2].SubObjects[0]
+        normal = gui.Selection.getSelectionEx()[2].SubObjects[0]
     except Exception:
         normal = None
     p11 = np.array(edge1.valueAt(edge1.FirstParameter))
@@ -105,3 +105,81 @@ def make_nurbs_connection():
     tang2 = np.array(edge2.tangentAt(t2))
     bs = curve_between_lines(p1, p2, s1 * tang1, s2 * tang2, n)
     Part.show(bs.toShape())
+
+def least_square_normal(points):
+    mat = np.array(p.tolist + [[1., 1., 1.]])
+    rhs = [0] * len(points) + [1]   # add a condition that the sum of all n_i is not equal to zero
+    normal = np.linalg.lstsq(mat, rhs)
+    normal /= np.linalg.norm(normal)
+    return normal
+
+import numpy as np
+import FreeCADGui as gui
+from scipy.optimize import minimize
+
+def least_square_circle():
+    """
+    finds the center and the radius (approximatly) of an edge
+    """
+    edge = gui.Selection.getSelectionEx()[0].SubObjects[0]
+    points = np.array(edge.discretize(100))
+    def min_function(center):
+        """
+        minimizing the std deviation of the distance to the center
+        """
+        dx = points - center
+        ri = np.linalg.norm(dx, axis=1)
+        return np.std(ri)
+    start = np.mean(points, axis=0)
+    center = minimize(min_function, start).x
+    dx = points - center
+    ri = np.linalg.norm(dx, axis=1)
+    r_mean = np.mean(ri)
+    r_std = np.std(ri)
+    print("center = {} \nradius = {} \nstd = {}".format(center, r_mean, r_std))
+
+def least_square_point():
+    import FreeCADGui as Gui
+    from freecad import app
+    lines = Gui.Selection.getSelection()
+    one = np.eye(3)
+    mat = []
+    rhs = []
+    for line in lines:
+        start = np.array([[*line.Start]]).T
+        end = np.array([[*line.End]]).T
+        t = end - start
+        t /= np.linalg.norm(t)
+        A = t @ t.T
+        t = t[0]
+        r = start - A @ start
+        m = one - A
+        for i in [0, 1, 2]:
+            mat.append(m[i])
+            rhs.append(r[i])
+    mat = np.array(mat)
+    rhs = np.array(rhs)
+    sol = np.linalg.lstsq(mat, rhs, rcond=None)
+    Part.show(Part.Point(app.Vector(*sol[0])).toShape())
+
+def proj_point2line():
+    import FreeCADGui as Gui
+    from freecad import app
+    point, line = Gui.Selection.getSelection()
+    point = point.Shape.Vertexes[0]
+    point = np.array([point.X, point.Y, point.Z])
+    start = np.array([*line.Start])
+    end = np.array([*line.End])
+    t = end - start
+    t /= np.linalg.norm(t)
+    diff = point - start
+    s = diff @ t
+    sol = start + s * t
+    Part.show(Part.Point(app.Vector(*sol)).toShape())
+
+
+
+def apply_transformation():
+    obj = gui.Selection.getSelection()[0]
+    obj.Shape = obj.Shape.transformGeometry(obj.Placement.Matrix)
+    obj.Placement = App.Matrix()

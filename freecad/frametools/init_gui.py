@@ -7,11 +7,11 @@ except ImportError:
 import os
 from freecad.frametools import ICON_PATH
 
-class frame_workbench(Gui.Workbench):
+class FrameWorkbench(Gui.Workbench):
     '''frame workbench'''
 
-    MenuText = 'frame and beams'
-    ToolTip = 'beam'
+    MenuText = 'Frame and beams'
+    ToolTip = 'Frame and beams'
     Icon = os.path.join(ICON_PATH, 'beam.svg')
     toolbox = ['Beam', 'CutMiter', 'CutPlane', 'CutShape', 'Reload']
     boxbox = ['LinkedFace', 'ExtrudedFace', 'FlatFace', 'FemSolver']
@@ -44,4 +44,4 @@ class frame_workbench(Gui.Workbench):
     def Deactivated(self):
         pass
 
-Gui.addWorkbench(frame_workbench())
+Gui.addWorkbench(FrameWorkbench())
