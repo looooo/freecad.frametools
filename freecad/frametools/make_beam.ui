@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+  <class>FrameAndBeamGui::CreateBeamParameters</class>
+  <widget class="QWidget" name="FrameAndBeamGui::CreateBeamParameters">
+    <property name="geometry">
+      <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>271</width>
+        <height>604</height>
+      </rect>
+    </property>
+    <property name="windowTitle">
+      <string>Create beam</string>
+    </property>
+    <layout class="QVBoxLayout" name="verticalLayout">
+      <item>
+        <layout class="QGridLayout" name="parameters">
+          <item row="0" column="0">
+            <widget class="QPushButton" name="buttonProfile">
+              <property name="text">
+                <string>Profile</string>
+              </property>
+              <property name="checkable">
+                <bool>true</bool>
+              </property>
+            </widget>
+          </item>
+          <item row="0" column="1">
+            <widget class="QLineEdit" name="lineProfile">
+              <property name="readOnly">
+                <bool>true</bool>
+              </property>
+            </widget>
+          </item>
+          <item row="1" column="0">
+            <widget class="QPushButton" name="buttonPaths">
+              <property name="text">
+                <string>Path</string>
+              </property>
+              <property name="checkable">
+                <bool>true</bool>
+              </property>
+            </widget>
+          </item>
+          <item row="1" column="1">
+            <widget class="QLineEdit" name="path">
+              <property name="readOnly">
+                <bool>true</bool>
+              </property>
+            </widget>
+          </item>
+          <item row="2" column="0">
+            <widget class="QLabel" name="labelExtent1">
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="text">
+                <string>Extent 1:</string>
+              </property>
+            </widget>
+          </item>
+          <item row="2" column="1">
+            <widget class="Gui::QuantitySpinBox" name="extent1">
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="minimumSize">
+                <size>
+                  <width>0</width>
+                  <height>5</height>
+                </size>
+              </property>
+              <property name="unit" stdset="0">
+                <string notr="true">mm</string>
+              </property>
+              <property name="minimum" stdset="0">
+                <double>0.000000000000000</double>
+              </property>
+            </widget>
+          </item>
+          <item row="3" column="0">
+            <widget class="QLabel" name="labelExtent2">
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="text">
+                <string>Extent 2:</string>
+              </property>
+            </widget>
+          </item>
+          <item row="3" column="1">
+            <widget class="Gui::QuantitySpinBox" name="extent2">
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="minimumSize">
+                <size>
+                  <width>0</width>
+                  <height>5</height>
+                </size>
+              </property>
+              <property name="unit" stdset="0">
+                <string notr="true">mm</string>
+              </property>
+              <property name="minimum" stdset="0">
+                <double>0.000000000000000</double>
+              </property>
+            </widget>
+          </item>
+          <item row="4" column="0">
+            <widget class="QLabel" name="labelRotation">
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="text">
+                <string>Profile rotation:</string>
+              </property>
+            </widget>
+          </item>
+          <item row="4" column="1">
+            <widget class="Gui::QuantitySpinBox" name="rotation">
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="minimumSize">
+                <size>
+                  <width>0</width>
+                  <height>5</height>
+                </size>
+              </property>
+              <property name="unit" stdset="0">
+                <string notr="true">deg</string>
+              </property>
+              <property name="minimum" stdset="0">
+                <double>0.000000000000000</double>
+              </property>
+            </widget>
+          </item>
+          <item row="5" column="0" colspan="2">
+            <widget class="QPushButton" name="buttonCreate">
+              <property name="text">
+                <string>Create</string>
+              </property>
+            </widget>
+          </item>
+        </layout>
+      </item>
+    </layout>
+  </widget>
+</ui>

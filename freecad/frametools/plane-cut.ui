@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>FrameAndBeamGui::CutBeamsParameters</class>
+ <widget class="QWidget" name="FrameAndBeamGui::CutBeamsParameters">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>271</width>
+    <height>604</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Cut type</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+      <layout class="QGridLayout" name="parameters">
+        <item row="0" column="0">
+          <widget class="QPushButton" name="buttonBeam">
+            <property name="text">
+              <string>Beam to cut</string>
+            </property>
+            <property name="checkable">
+              <bool>true</bool>
+            </property>
+          </widget>
+        </item>
+        <item row="0" column="1">
+          <widget class="QLineEdit" name="beam">
+            <property name="readOnly">
+              <bool>true</bool>
+            </property>
+          </widget>
+        </item>
+        <item row="1" column="0">
+          <widget class="QPushButton" name="buttonFace">
+            <property name="text">
+              <string>Cut with</string>
+            </property>
+            <property name="checkable">
+              <bool>true</bool>
+            </property>
+          </widget>
+        </item>
+        <item row="1" column="1">
+          <widget class="QLineEdit" name="face">
+            <property name="readOnly">
+              <bool>true</bool>
+            </property>
+          </widget>
+        </item>
+        <item row="2" column="0" colspan="2">
+          <widget class="QPushButton" name="buttonCut">
+            <property name="text">
+              <string>Cut</string>
+            </property>
+          </widget>
+        </item>
+        <item row="3" column="0" colspan="2">
+          <widget class="QLabel" name="validationMessage">
+            <property name="wordWrap">
+              <bool>true</bool>
+            </property>
+          </widget>
+        </item>
+      </layout>
+    </item>
+  </layout>
+ </widget>
+</ui>

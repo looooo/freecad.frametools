@@ -41,7 +41,7 @@ class Beam(BaseCommand):
         interaction.make_beam(self.view)
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(ICON_PATH, 'beam.svg'), 'MenuText': 'beam', 'ToolTip': 'beam'}
+        return {'Pixmap': os.path.join(ICON_PATH, 'beam.svg'), 'MenuText': 'Beam', 'ToolTip': 'Create a beam'}
 
 
 class CutMiter(BaseCommand):
@@ -50,7 +50,7 @@ class CutMiter(BaseCommand):
         interaction.make_miter_cut(self.view)
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(ICON_PATH, 'beam_miter_cut.svg'), 'MenuText': 'miter_cut', 'ToolTip': 'miter_cut'}
+        return {'Pixmap': os.path.join(ICON_PATH, 'beam_miter_cut.svg'), 'MenuText': 'Miter Cut', 'ToolTip': 'Perform miter cut of 2 beams'}
 
 
 class CutPlane(BaseCommand):
@@ -59,7 +59,7 @@ class CutPlane(BaseCommand):
         interaction.make_plane_cut(self.view)
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(ICON_PATH, 'beam_plane_cut.svg'), 'MenuText': 'plane_cut', 'ToolTip': 'plane_cut'}
+        return {'Pixmap': os.path.join(ICON_PATH, 'beam_plane_cut.svg'), 'MenuText': 'Plane Cut', 'ToolTip': 'Cut a beam by a face of another beam'}
 
 
 class CutShape(BaseCommand):
@@ -68,7 +68,7 @@ class CutShape(BaseCommand):
         interaction.make_shape_cut(self.view)
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(ICON_PATH, 'beam_shape_cut.svg'), 'MenuText': 'shape_cut', 'ToolTip': 'shape_cut'}
+        return {'Pixmap': os.path.join(ICON_PATH, 'beam_shape_cut.svg'), 'MenuText': 'Shape Cut', 'ToolTip': 'Cut a beam by outer surface of another beam'}
 
 
 class LinkedFace(BaseCommand):
@@ -77,7 +77,7 @@ class LinkedFace(BaseCommand):
         boxtools.create_linked_face()
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(ICON_PATH, 'linked_face.svg'), 'MenuText': 'linked_face', 'ToolTip': 'linked_face'}
+        return {'Pixmap': os.path.join(ICON_PATH, 'linked_face.svg'), 'MenuText': 'Linked Face', 'ToolTip': 'linked_face'}
 
 
 class ExtrudedFace(BaseCommand):
@@ -86,7 +86,7 @@ class ExtrudedFace(BaseCommand):
         boxtools.create_extruded_face()
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(ICON_PATH, 'extruded_face.svg'), 'MenuText': 'extruded_face', 'ToolTip': 'extruded_face'}
+        return {'Pixmap': os.path.join(ICON_PATH, 'extruded_face.svg'), 'MenuText': 'Extruded Face', 'ToolTip': 'extruded_face'}
 
 
 class FlatFace(BaseCommand):
@@ -95,7 +95,7 @@ class FlatFace(BaseCommand):
         boxtools.create_flat_face()
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(ICON_PATH, 'linked_face.svg'), 'MenuText': 'flat_face', 'ToolTip': 'flat_face'}
+        return {'Pixmap': os.path.join(ICON_PATH, 'linked_face.svg'), 'MenuText': 'Flat Face', 'ToolTip': 'flat_face'}
 
 
 class NurbsConnection(BaseCommand):
@@ -104,7 +104,7 @@ class NurbsConnection(BaseCommand):
         bspline_tools.make_nurbs_connection()
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(ICON_PATH, 'nurbs_connect.svg'), 'MenuText': 'nurbs_connect', 'ToolTip': 'nurbs_connect'}
+        return {'Pixmap': os.path.join(ICON_PATH, 'nurbs_connect.svg'), 'MenuText': 'NURBS Connect', 'ToolTip': 'nurbs_connect'}
 
 
 class FemSolver(BaseCommand):
@@ -115,7 +115,7 @@ class FemSolver(BaseCommand):
         App.ActiveDocument.recompute()
 
     def GetResources(self):
-        return {'Pixmap': os.path.join(ICON_PATH, "generic_solver.svg"), 'MenuText': 'fem_solver', 'ToolTip': 'fem_solver'}
+        return {'Pixmap': os.path.join(ICON_PATH, "generic_solver.svg"), 'MenuText': 'FEM Solver', 'ToolTip': 'fem_solver'}
 
 
 class Reload():
