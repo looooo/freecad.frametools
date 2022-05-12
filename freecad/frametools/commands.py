@@ -122,7 +122,7 @@ class Reload():
     NOT_RELOAD = ["freecad.frametools.init_gui"]
     RELOAD = ["freecad.frametools"]
     def GetResources(self):
-        return {'Pixmap': 'refresh_command.svg', 'MenuText': 'Refresh', 'ToolTip': 'Refresh'}
+        return {'Pixmap': os.path.join(ICON_PATH, 'reload.svg'), 'MenuText': 'Refresh', 'ToolTip': 'Refresh'}
 
     def IsActive(self):
         return True
@@ -133,7 +133,7 @@ class Reload():
         except ImportError:
             pass # this is python2
         import sys
-        for name, mod in sys.modules.items():
+        for name, mod in sys.modules.copy().items():
             for rld in self.RELOAD:
                 if rld in name:
                     if mod and name not in self.NOT_RELOAD:
