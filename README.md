@@ -1,15 +1,24 @@
-A frame-module for freecad
----------------------------
+# FreeCAD Frame Workbench 
+A frame-module for FreeCAD
 
-## Install:
-* Use only with FreeCAD version >= 0.16
-* `git clone https://github.com/looooo/freecad_frame.git`
-* Link or copy the folder into /freecad/Mod (sudo ln -s (path_to_freecad_frame) (path_to_freecad)/Mod
+## Requirements
+* FreeCAD >= v0.16
+* scipy v?? <----
+
+## Installation
+### Automatic Installation
+As of v0.17 it's possible to use the built-in FreeCAD [Addon Manager](https://github.com/FreeCAD/FreeCAD-addons#1-builtin-addon-manager) 
+to install this workbench.
+
+### Manual Installation
+  * `cd ~/.freecad/Mod || mkdir ~/.freecad/Mod && cd ~/.freecad/Mod`
+  * `git clone https://github.com/looooo/freecad_frame.git`
+  * restart FreeCAD
 
 ## Usage
 
-### Create a beam:
-* Open freecad
+### Create a Beam
+
 * Create new document
 * Create profile. Possible sources for profile:
   * Sketch
@@ -75,3 +84,13 @@ If one or two beams are selected when "Shape Cut" command activated
 they will be preselected as "Beam 1" and "Beam 2". To cut them press
 "Cut" button.
 
+## Feedback
+Offer feedback and discuss this workbench in the [dedicated FreeCAD forum thread]()
+
+## Known Limitations
+
+## Developer
+[@looooo](https://github.com/looooo)
+
+## License
+GNU Lesser General Public License v2.1
