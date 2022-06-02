@@ -36,7 +36,7 @@ to install this workbench.
   
   Curves can't be used as path for beams.
 * Go to Frame and beams WB.
-  * Select "Beam" command.
+  * Select "Beam" command <img src="/freecad/frametools/icons/beam.svg" width="24" height="24">
   * Select profile.
   * Select path.
   * Enter extents if beams should be longer than path.
@@ -47,7 +47,7 @@ to install this workbench.
 
 ### Miter cut two beams
   
-* Select "Miter Cut" command from Frame and beam WB.
+* Select "Miter Cut" command from Frame and beam WB <img src="/freecad/frametools/icons/beam_miter_cut.svg" width="24" height="24">
 * Select first beam.
 * Select second beam which intesects the first beam.
 * Press "Cut".
@@ -60,7 +60,7 @@ they will be preselected as "Beam 1" and "Beam 2". To cut them press
 
 ### Plane Cut
 
-* Select "Plane Cut" command from Frame and beam WB.
+* Select "Plane Cut" command from Frame and beam WB <img src="/freecad/frametools/icons/beam_plane_cut.svg" width="24" height="24">
 * Select first beam.
 * Select face of another beam which intersects the first beam.
 * Press "Cut".
@@ -73,7 +73,7 @@ with". To cut them press "Cut" button.
 
 ### Shape Cut
 
-* Select "Shape Cut" command from Frame and beam WB.
+* Select "Shape Cut" command from Frame and beam WB <img src="/freecad/frametools/icons/beam_shape_cut.svg" width="24" height="24">
 * Select first beam.
 * Select second beam which intesects the first beam.
 * Press "Cut".
