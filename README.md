@@ -84,6 +84,89 @@ If one or two beams are selected when "Shape Cut" command activated
 they will be preselected as "Beam 1" and "Beam 2". To cut them press
 "Cut" button.
 
+## Example
+
+Gate lead creation.
+
+<img src="/example/gate/beams_cutted.png">
+
+Prerequisites:
+
+* Made from hollow profile with rounded corners with size 40x20mm and thickness 2mm.
+* Internal height between top and bottom bars is 1500mm.
+* Horizontal size 1700mm.
+* Middle bars added to have decorations inside between top and middle
+  bar and bottom and middle bar (not shown due to lack of
+  object). Height of decorations is 155mm.
+* Diagonal supports added. 
+
+1. Create profile.
+
+   <img src="/example/gate/profile_sketch.png">
+
+   1. Create a new sketch in XY plane.
+   2. Repeat drawing from picture above. Outer rounding radius is 3mm,
+      inner rounding radius is 2mm.
+   3. Close sketch.
+   4. Select Part Workbench and convert sketch to face ("Make face from
+      wires" command).
+
+2. Create sketch for beam axes. Since this is gate leaf the sketch
+   should be created, for example, in XZ plane.
+   
+   <img src="/example/gate/beams_sketch.png">
+   
+   This will require a little bit more work because some measurements
+   give outer sizes, some give inner and no one give axes. The
+   diagonal supports are drawn acoording to other beams.
+
+3. Create outer beams. Since they should fully intersect the "Extent
+   1" and "Extent 2" should have value 20mm at least. Please don't
+   enter very big values because some extra parts can be left after
+   cutting.
+   
+   <img src="/example/gate/outer_beams.png">
+   
+4. Create inner beams. They axes long enough to get full intersection
+   with other beams so the extents can be left as is.
+   
+   <img src="/example/gate/inner_beams.png">
+   
+5. Miter cut outer beams.
+
+   Please note thnat *every* cut operation creates a new beam so if
+   beam needs to be cutted twice it should be reselected after the
+   first cut.
+
+6. Plane cut inner beams bout outre beams and middle horizontal beams.
+
+   <img src="/example/gate/beams_cutted.png">
+   
+7. Select TechDraw Workbench
+
+   <img src="/example/gate/drawing.png">
+   
+   1. Insert page from template and select A4 Portrait template.
+   2. Go to the 3D view and select "Front View" to see fron side.
+   3. Select Main Diagonal.
+   4. Go to the inserted page and press "Insert view". The page will
+      contain huge page placed as viewed.
+   5. Select view in tree and set scale to 0.1. This makes beam
+      completely inside drawing.
+   6. The TechDraw doesn't allow to simple rotations like "make this
+      line vertical" so view should be rotated by -55.582 degrees
+      (measured as angle between vertical border and angled one). This
+      make beam straight vertical on drawing.
+   7. Add dimensions to overall length and how to cut corners.
+   
+   Repeat steps above for every unique beam. Fill fields below as
+   needed. This gives the set of drawing suitable to create all parts
+   of gate leaf. 
+   
+   To have drawing with guide to assemble it full view (with all part
+   selected) should be inserted on a new page. Welding annotations
+   will describe how to join parts.
+   
 ## Feedback
 Offer feedback and discuss this workbench in the [dedicated FreeCAD forum thread]()
 
