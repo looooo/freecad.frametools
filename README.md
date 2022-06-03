@@ -86,9 +86,9 @@ they will be preselected as "Beam 1" and "Beam 2". To cut them press
 
 ## Example
 
-Gate lead creation.
+Gate leaf creation.
 
-<img src="/example/gate/beams_cutted.png">
+<img src="/example/gate/beams_cut.png">
 
 Prerequisites:
 
@@ -105,8 +105,8 @@ Prerequisites:
    <img src="/example/gate/profile_sketch.png">
 
    1. Create a new sketch in XY plane.
-   2. Repeat drawing from picture above. Outer rounding radius is 3mm,
-      inner rounding radius is 2mm.
+   2. Repeat drawing from picture above. Outer rounding radius is 3mm
+      and inner rounding radius is 2mm.
    3. Close sketch.
    4. Select Part Workbench and convert sketch to face ("Make face from
       wires" command).
@@ -118,7 +118,9 @@ Prerequisites:
    
    This will require a little bit more work because some measurements
    give outer sizes, some give inner and no one give axes. The
-   diagonal supports are drawn acoording to other beams.
+   diagonal supports are drawn according to other beams. To achieve
+   correct lines construction geometry should be used for everything
+   that is not beam in final design like outer edge of gate. 
 
 3. Create outer beams. Since they should fully intersect the "Extent
    1" and "Extent 2" should have value 20mm at least. Please don't
@@ -134,27 +136,32 @@ Prerequisites:
    
 5. Miter cut outer beams.
 
-   Please note thnat *every* cut operation creates a new beam so if
-   beam needs to be cutted twice it should be reselected after the
-   first cut.
+   <img src="/example/gate/outer_beams_cut.png">
+   
+   Please note that *every* cut operation creates a new beam so if
+   beam needs to be cut twice it should be reselected after the
+   first cut. Removing cut beam can break other cut beams if it is
+   used in the other beam cut operation.
 
-6. Plane cut inner beams bout outre beams and middle horizontal beams.
+6. Plane cut inner beams by outer beams inner planes. Plane cut
+   diagonals.
 
-   <img src="/example/gate/beams_cutted.png">
+   <img src="/example/gate/beams_cut.png">
    
 7. Select TechDraw Workbench
 
    <img src="/example/gate/drawing.png">
    
    1. Insert page from template and select A4 Portrait template.
-   2. Go to the 3D view and select "Front View" to see fron side.
+   2. Go to the 3D view and select "Front View" to see front side. The
+      TechDraw inserts view in current active projection.
    3. Select Main Diagonal.
    4. Go to the inserted page and press "Insert view". The page will
       contain huge page placed as viewed.
    5. Select view in tree and set scale to 0.1. This makes beam
       completely inside drawing.
-   6. The TechDraw doesn't allow to simple rotations like "make this
-      line vertical" so view should be rotated by -55.582 degrees
+   6. The TechDraw don't allow to simple rotations like "make this
+      line vertical" so view should be rotated by -55.582°
       (measured as angle between vertical border and angled one). This
       make beam straight vertical on drawing.
    7. Add dimensions to overall length and how to cut corners.
