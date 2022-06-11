@@ -18,6 +18,7 @@
       <freecadmin>0.19</freecadmin>
       <tag>frame</tag>
       <tag>beam</tag>
+      <depend>scipy</depend>
     </workbench>
   </content>
 
