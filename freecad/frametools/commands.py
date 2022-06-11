@@ -5,6 +5,7 @@ import FreeCAD as App
 from freecad.frametools import ICON_PATH
 from . import interaction, boxtools, bspline_tools
 from . import fem2d
+from . import screw_maker
 
 
 __all__ = [
@@ -96,6 +97,17 @@ class FlatFace(BaseCommand):
 
     def GetResources(self):
         return {'Pixmap': os.path.join(ICON_PATH, 'linked_face.svg'), 'MenuText': 'Flat Face', 'ToolTip': 'flat_face'}
+
+class ScrewMaker(BaseCommand):
+
+    def Activated(self):
+        a = App.ActiveDocument.addObject("Part::FeaturePython", "screw")
+        screw_maker.Screw(a)
+        screw_maker.ViewproviderScrew(a.ViewObject)
+
+    def GetResources(self):
+        return {'Pixmap': os.path.join(ICON_PATH, 'screw.svg'), 'MenuText': 'create Screw', 'ToolTip': 'create Screw'}
+
 
 
 class NurbsConnection(BaseCommand):
