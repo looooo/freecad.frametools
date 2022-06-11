@@ -326,7 +326,8 @@ class ViewProviderCBeam(ViewProviderBeam):
         return [self.vobj.Object.this_beam]
 
     def getIcon(self):
-        return(ICON_PATH + "beam.svg")
+        _dir = os.path.dirname(os.path.realpath(__file__))
+        return(_dir + "/" + "icons/beam.svg")
 
 
 def norm(p):
