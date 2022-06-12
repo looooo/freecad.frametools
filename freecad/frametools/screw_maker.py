@@ -33,20 +33,31 @@ class Screw(object):
         for ed in edges_discretized:
             height = max([height, max(ed.T[2])])
         pitch = obj.threads * height
-        all_edges_discretized = copy.deepcopy(edges_discretized)
+        all_edges_discretized = [edges_discretized]
         for i in range(1, obj.threads):
+            segment_edges = []
             for ed in edges_discretized:
                 ed_new = copy.deepcopy(ed)
                 ed_new.T[2] += height * i
-                all_edges_discretized.append(ed_new)
+                segment_edges.append(ed_new)
+            all_edges_discretized.append(segment_edges)
         # 4: do the helical projection
-        bspw = make_bspline_wire(all_edges_discretized)
-        profile_coords = []
-        for ed in all_edges_discretized:
-            profile_coords.append(helical_projection(ed.T[0], ed.T[2], pitch, obj.left_hand)) # leftsided?
+        segments = []
+        for segment in all_edges_discretized:
+            profile_coords = []
+            for ed in segment:
+                profile_coords.append(helical_projection(ed.T[0], ed.T[2], pitch, obj.left_hand))
+            segments.append(profile_coords)
         # 5: create the bspline interpolation
-        wire = make_bspline_wire(profile_coords)
-        face = Face(wire)
+        wires = []
+        for s in segments:
+            wires.append(make_bspline_wire(s))
+        try:
+            wire = Wire(wires)
+            face = Face(wire)
+        except Part.OCCError:
+            # we have multiple faces
+            face = Face(wires)
         sign = -(int(obj.left_hand) * 2 - 1)
         obj.Shape = helicalextrusion(face, obj.height, sign * obj.height / pitch * 2 * np.pi)
 
