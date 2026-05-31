@@ -15,6 +15,17 @@ __all__ = [
     "make_shape_cut"]
 
 
+def _int_enum(value):
+    try:
+        return int(value)
+    except TypeError:
+        return value
+
+
+def _spinbox_value(spinbox):
+    return spinbox.property("rawValue")
+
+
 def refresh():
     reload(beamobj)
 
@@ -78,14 +89,14 @@ class make_beam(object):
             a = App.ActiveDocument.addObject("Part::FeaturePython", "beam")
             beamobj.Beam(a, self.profile, path_sketch, subobject)
             beamobj.ViewProviderBeam(a.ViewObject)
-            a.exdent_1 = self.form.extent1.property("value")
-            a.exdent_2 = self.form.extent2.property("value")
-            a.Rotation = self.form.rotation.property("value")
+            a.exdent_1 = _spinbox_value(self.form.extent1)
+            a.exdent_2 = _spinbox_value(self.form.extent2)
+            a.Rotation = _spinbox_value(self.form.rotation)
 
         App.ActiveDocument.recompute()
 
     def getStandardButtons(self):
-        return int(QtGui.QDialogButtonBox.Close)
+        return _int_enum(QtGui.QDialogButtonBox.Close)
 
     def reject(self):
         Gui.Selection.removeObserver(self)
@@ -177,7 +188,7 @@ class make_miter_cut(object):
         App.ActiveDocument.recompute()
 
     def getStandardButtons(self):
-        return int(QtGui.QDialogButtonBox.Close)
+        return _int_enum(QtGui.QDialogButtonBox.Close)
 
     def reject(self):
         Gui.Selection.removeObserver(self)
@@ -268,7 +279,7 @@ class make_plane_cut(object):
         App.ActiveDocument.recompute()
 
     def getStandardButtons(self):
-        return int(QtGui.QDialogButtonBox.Close)
+        return _int_enum(QtGui.QDialogButtonBox.Close)
 
     def reject(self):
         Gui.Selection.removeObserver(self)
@@ -355,7 +366,7 @@ class make_shape_cut(object):
         App.ActiveDocument.recompute()
 
     def getStandardButtons(self):
-        return int(QtGui.QDialogButtonBox.Close)
+        return _int_enum(QtGui.QDialogButtonBox.Close)
 
     def reject(self):
         Gui.Selection.removeObserver(self)
