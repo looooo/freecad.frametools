@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+  <class>FrameToolsGui::ReferenceLine</class>
+  <widget class="QWidget" name="FrameToolsGui::ReferenceLine">
+    <property name="geometry">
+      <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>320</width>
+        <height>120</height>
+      </rect>
+    </property>
+    <property name="windowTitle">
+      <string>Referenzlinie</string>
+    </property>
+    <layout class="QVBoxLayout" name="verticalLayout">
+      <item>
+        <layout class="QHBoxLayout" name="lengthLayout">
+          <item>
+            <widget class="QLabel" name="labelTargetLength">
+              <property name="text">
+                <string>Soll-Länge:</string>
+              </property>
+            </widget>
+          </item>
+          <item>
+            <widget class="Gui::QuantitySpinBox" name="targetLength">
+              <property name="unit" stdset="0">
+                <string>mm</string>
+              </property>
+              <property name="value" stdset="0">
+                <double>100.000000000000000</double>
+              </property>
+            </widget>
+          </item>
+        </layout>
+      </item>
+      <item>
+        <widget class="QPushButton" name="buttonAddLine">
+          <property name="text">
+            <string>Linie zeichnen</string>
+          </property>
+        </widget>
+      </item>
+    </layout>
+  </widget>
+  <customwidgets>
+    <customwidget>
+      <class>Gui::QuantitySpinBox</class>
+      <extends>QWidget</extends>
+      <header>Gui/QuantitySpinBox.h</header>
+    </customwidget>
+  </customwidgets>
+  <resources/>
+  <connections/>
+</ui>

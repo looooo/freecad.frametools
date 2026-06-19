@@ -6,6 +6,7 @@ from freecad.frametools import ICON_PATH
 from . import interaction, boxtools, bspline_tools
 from . import fem2d
 from . import screw_maker
+from . import image_tools
 
 
 __all__ = [
@@ -128,6 +129,71 @@ class FemSolver(BaseCommand):
 
     def GetResources(self):
         return {'Pixmap': os.path.join(ICON_PATH, "generic_solver.svg"), 'MenuText': 'FEM Solver', 'ToolTip': 'fem_solver'}
+
+
+class AlignedImage(BaseCommand):
+
+    def Activated(self):
+        image_tools.convert_selected_to_aligned_images()
+
+    def GetResources(self):
+        return {
+            'Pixmap': os.path.join(ICON_PATH, 'image_align.svg'),
+            'MenuText': 'Aligned Image',
+            'ToolTip': 'Draft/Image in AlignedImage mit Coin-Darstellung umwandeln',
+        }
+
+
+class FeaturePair(BaseCommand):
+
+    def Activated(self):
+        image_tools.create_feature_pair()
+
+    def GetResources(self):
+        return {
+            'Pixmap': os.path.join(ICON_PATH, 'feature_pair.svg'),
+            'MenuText': 'Feature Pair',
+            'ToolTip': 'Feature-Paar aus zwei Punkten erstellen',
+        }
+
+
+class ReferenceLine(BaseCommand):
+
+    def Activated(self):
+        image_tools.create_reference_line()
+
+    def GetResources(self):
+        return {
+            'Pixmap': os.path.join(ICON_PATH, 'reference_line.svg'),
+            'MenuText': 'Reference Line',
+            'ToolTip': 'Referenzlinie mit Soll-Länge erstellen',
+        }
+
+
+class ImageOverlay(BaseCommand):
+
+    def Activated(self):
+        image_tools.overlay_images()
+
+    def GetResources(self):
+        return {
+            'Pixmap': os.path.join(ICON_PATH, 'image_overlay.svg'),
+            'MenuText': 'Image Overlay',
+            'ToolTip': 'Zwei Bilder anhand von Feature-Paaren überlagern',
+        }
+
+
+class ScaleSolver(BaseCommand):
+
+    def Activated(self):
+        image_tools.solve_reference_lines()
+
+    def GetResources(self):
+        return {
+            'Pixmap': os.path.join(ICON_PATH, 'scale_solver.svg'),
+            'MenuText': 'Scale Solver',
+            'ToolTip': 'Orientierung/Skalierung anhand von Referenzlinien berechnen',
+        }
 
 
 class Reload():
