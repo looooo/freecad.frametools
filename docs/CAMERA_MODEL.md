@@ -9,6 +9,8 @@ Erweiterung des Image-Workflows in FrameTools.
 **Siehe auch:** [IMAGE_TOOLS.md](IMAGE_TOOLS.md) (Anwendung), [IMAGE_ALIGNMENT.md](IMAGE_ALIGNMENT.md)
 (Workflow), [README.md](README.md) (Doku-Übersicht).
 
+**Geplanter UI-Workflow (Display-Muster 16×8, zwei Toolbar-Befehle):** Abschnitt [13](#13-geplanter-freecad-workflow-display-muster).
+
 ---
 
 ## 1. Motivation
@@ -280,6 +282,8 @@ world_from_image_uv(u, v):
 
 ## 10. Implementierungs-Roadmap (Vorschlag)
 
+Siehe auch **Abschnitt 13.8** (UI mit Display-Muster und zwei Befehlen).
+
 1. **`CameraModel`** — Property-Objekt, JSON Import/Export, undistort_uv().
 2. **`AlignedImage.CameraModelLink`** — UV-Pipeline in `_world_on_image_uv` /
    `image_homography.py`.
@@ -308,3 +312,204 @@ world_from_image_uv(u, v):
 | H | Projektive Abbildung UV → Welt-mm (pro AlignedImage) |
 | H_grid | Homographie nur für Gitter-Kalibrierungsfoto (nicht speichern) |
 | undistort | Anwendung von δ auf Roh-UV vor H |
+| inverse_undistort | Roh-UV zum Textur-Sampling bei rechteckiger Anzeige |
+
+---
+
+## 13. Geplanter FreeCAD-Workflow (Display-Muster)
+
+Dieser Abschnitt beschreibt den **vorgesehenen UI-Ablauf** in FrameTools: kein
+gedrucktes Schachbrett nötig, stattdessen ein **Punktemuster auf dem Monitor**, das
+der Nutzer mit der **Arbeitskamera** fotografiert.
+
+### 13.1 Übersicht
+
+Zwei neue Befehle in der Image-Toolbar (Namen vorläufig):
+
+| Befehl | Funktion |
+|--------|----------|
+| **Kameramodell kalibrieren** | Muster 16×8 am Display anzeigen → Foto laden → δ berechnen → `CameraModel` im Dokument |
+| **Bild mit Entzerrung laden** | Foto + verknüpftes `CameraModel` → `AlignedImage` mit B-Spline-UV, rechteckige Fläche, schwarze Ränder |
+
+```text
+[Kameramodell kalibrieren]
+    → Vollbild-/Dialog: 16×8 Punkte (hell auf schwarz)
+    → Nutzer fotografiert den Bildschirm
+    → Foto in FreeCAD wählen
+    → Punkte automatisch finden (128 Stück)
+    → H_grid + δ(u,v) fitten → CameraModel speichern
+
+[Bild mit Entzerrung laden]
+    → CameraModel wählen (oder zuletzt verwendet)
+    → Arbeitsfoto wählen
+    → AlignedImage: rechteckiges Quad/Mesh in der Szene
+    → Textur-Sampling über inverse Entzerrung
+    → Bereich außerhalb gültiger Abbildung: schwarz
+    → danach wie heute: Ecken / ImageCalibration / Längen
+```
+
+### 13.2 Display-Muster 16×8
+
+**Geometrie:** regelmäßiges Raster **16 Spalten × 8 Zeilen** = **128 Kalibrierpunkte**.
+
+| Parameter | Vorschlag |
+|-----------|-----------|
+| Darstellung | Vollbild schwarz, weiße/helle Kreise an Gitterpositionen |
+| Rand | Randabstand (z. B. 5 %), damit äußere Punkte nicht am Monitorrand liegen |
+| Metadaten (mit Muster speichern) | Auflösung in Pixel, Position/Größe des Muster-Rechtecks, Punktabstand in px |
+| Optional | kurzer Text „FrameTools Kalibrierung — Foto aufnehmen“ |
+
+**Warum Monitor statt Druck:** exakte Soll-Pixelkoordinaten bekannt, kein Druckmaßstab;
+128 Punkte reichen für B-Spline 4×4 plus Regularisierung mit Reserve.
+
+**Hinweise an den Nutzer (Dialog):**
+
+- Kamera **dieselbe Brennweite/Zoom** wie bei späteren Arbeitsfotos,
+- Bildschirm **frontal** anfahren (leichte Schräge ist OK — H_grid entfernt sie),
+- **kein Blitz**, Reflexionen vermeiden,
+- bei OLED/Laptop: Helligkeit hoch, ggf. längere Belichtung gegen Flackern.
+
+**Stolpersteine Display-Kalibrierung:**
+
+| Effekt | Folge |
+|--------|--------|
+| Moiré | Ecken ungenau → Subpixel-Fit + große Punkte im Muster |
+| Refresh / PWM | Streifen im Foto → längere Belichtung, statisches Muster |
+| Spiegelung | Ausreißer → robustes Fit, RAND-Maske |
+| Monitor nicht planar | δ nimmt Knick mit auf — weniger ideal als Druckplatte |
+
+### 13.3 Automatische Punkterkennung (128-Punkt-Muster)
+
+Anders als Schachbrett-OpenCV: **Blob-Detektion** auf hellem Gitter:
+
+1. Graustufen, Schwellwert / adaptive Threshold (helle Punkte),
+2. Konturen → Schwerpunkt pro Blob,
+3. **Raster sortieren:** Cluster nach y → Zeilen, innerhalb Zeile nach x → Spalten,
+4. Plausibilität: genau 8×16 = 128 Punkte; sonst Fehlermeldung + manuelle Korrektur (später),
+5. **Subpixel-Verfeinerung** (Schwerpunkt in Nachbarschaft oder `cornerSubPix`-ähnlich).
+
+Soll-Koordinaten pro Punkt \(i\): normierte Display-UV \((u_i^{\mathrm{soll}}, v_i^{\mathrm{soll}})\)
+aus gespeicherten Muster-Metadaten (nicht mm — die „Welt“ beim Kalibrieren ist die
+**ideale Bildschirm-Ebene** in Pixel).
+
+OpenCV `findChessboardCorners` ist **optional** falls das Muster stattdessen als
+Schachbrett gerendert wird; für **Punktraster** reicht eigene Detektion (kein OpenCV
+zwingend nötig).
+
+### 13.4 Berechnung beim Kameramodell-Befehl
+
+Reihenfolge (Entkopplung Schieflage / Verzerrung):
+
+```
+Detektierte (u, v)_raw im Foto     Soll (u, v)_display aus Muster-Metadaten
+              │                              │
+              └──────────┬───────────────────┘
+                         ▼
+              Schritt 1: H_grid (Ausgleich)
+              Perspektive Foto ↔ ideale Display-Ebene
+                         │
+                         ▼
+              Rest: (u,v)_display − H_grid(u,v)_raw
+                         │
+                         ▼
+              Schritt 2: B-Spline δ(u,v) in Bild-UV
+              (Korrektur im **Kamera-Fotoraster**, siehe unten)
+                         │
+                         ▼
+              CameraModel im Dokument speichern
+```
+
+**Umrechnung δ:** Restfehler nach H_grid werden auf **normierte Foto-UV** \([0,1]^2\)
+bezogen und als Verschiebung δ(u,v) gespeichert — dieselbe Domain wie bei späteren
+Arbeitsfotos (**Referenz: Pixelkoordinaten des Kamera-Chips**, nicht Display-Pixel).
+
+Referenz-Fotogröße (`ImageSize`) des Kalibrierbildes im `CameraModel` ablegen.
+
+### 13.5 Befehl „Bild mit Entzerrung laden“
+
+**Ziel:** Arbeitsfoto **rechteckig** in FreeCAD einbinden (wie gewohnt ein
+achsenparalleles Bild-Quad), aber **inhaltlich entzerrt**; Randbereiche ohne gültige
+Zuordnung **schwarz**.
+
+#### Rechteckige Anzeige + B-Spline
+
+Das Anzeige-Quad bleibt ein **Rechteck** in der Coin-Szene (UV-Anzeige-Raster
+\([0,1]^2\)). Die **Textur** ist das **unveränderte Roh-JPEG** (rechteckig).
+
+Für jeden Anzeige-Knoten \((u_d, v_d)\) auf dem Rechteck:
+
+1. **Inverse Entzerrung:** finde Rohkoordinaten \((u_r, v_r)\), sodass  
+   \(\text{undistort}(u_r, v_r) = (u_d, v_d)\)  
+   (Newton / Lookup-Grid / festes iteratives Verfahren),
+2. **Sampling:** Textur bei \((u_r, v_r)\),
+3. **Schwarz**, wenn \((u_r, v_r) \notin [0,1]^2\) oder außerhalb des gültigen
+   δ-Domain / Konvergenz der Inversion fehlschlägt.
+
+```text
+Anzeige-Rechteck (u_d, v_d)  ──inverse_undistort──►  (u_r, v_r)  ──► Textur
+        │                                                    │
+        └── außerhalb / ungültig ───────────────────────────► schwarz
+```
+
+**Warum inverse Richtung:** δ ist definiert als Roh → entzerrt. Coin fragt pro
+**Anzeige-Pixel**, welche Texturkoordinate gelesen werden soll — das ist die **Inverse**.
+
+Typisch entstehen **schwarze Ränder** (Letterboxing): nach Entzerrung füllt das
+Kamerabild nicht mehr das volle Rechteck (Fischauge „zieht“ Ränder nach innen).
+
+#### Coin-Umsetzung
+
+- Tesselliertes Mesh (z. B. 64×64) über Anzeige-\([0,1]^2\),
+- `SoTextureCoordinate2`: pro Vertex \((u_r, v_r)\) oder Sentinel → schwarze Farbe,
+- `SoTexture2`: Rohbild,
+- optional `SoMaterial` / zweite Ebene für explizit schwarze Dreiecke,
+- Weltplatzierung weiter über `Corner0…Corner1` und `WarpMatrix` (bestehender Pfad).
+
+**Wichtig:** Das Rechteck bezieht sich auf **entzerrten Bildinhalt**, nicht auf das
+verzerrte Rohformat — Nutzer sieht ein „gerades“ Bild; schwarze Zonen markieren fehlende
+Pixel nach Entzerrung.
+
+### 13.6 FreeCAD-Objekte und Properties (Erweiterung)
+
+```text
+CameraModel
+  PatternType              "display_dots_16x8"
+  CalibrationImageSize     (width, height) px des Kalibrierfotos
+  PatternMetadata          JSON: Display-Auflösung, Muster-Rect, Punktliste Soll-UV
+  SplineControlPoints      δ(u,v) B-Spline (3×3 oder 4×4)
+  CalibrationRMS           px
+  CalibrationImage         Pfad Referenzfoto (optional)
+
+AlignedImage  (Erweiterung)
+  CameraModelLink          → CameraModel
+  UndistortDisplay         True wenn über „Bild mit Entzerrung laden“
+  … Corner0…Corner1, WarpMatrix wie heute
+```
+
+### 13.7 Ablauf im Gesamt-Workflow
+
+```text
+Einmalig:
+  [Kameramodell kalibrieren] → CameraModel im Dokument
+
+Pro Projekt / Foto:
+  [Bild mit Entzerrung laden] → AlignedImage (entzerrt, rechteckig, schwarze Ränder)
+  → optional ImageCalibration, Längen, Solve (auf entzerrten UV)
+
+Overlay / Feature-Pairs:
+  UV-Operationen nutzen undistort() konsistent (bestehende Pipeline erweitern)
+```
+
+### 13.8 Implementierungs-Roadmap (UI)
+
+1. **`CameraModelCalibrate` Command** — Vollbild-Dialog mit 16×8-Muster + Metadaten-Export.
+2. **Blob-Detektion + Grid-Sort** — 128 Punkte, Validierung, Vorschau im Dialog.
+3. **`fit_camera_model_from_points()`** — H_grid, dann δ; speichern als `CameraModel`.
+4. **`LoadUndistortedImage` Command** — Datei + Model → `AlignedImage`.
+5. **`undistort_uv` / `inverse_undistort_uv`** in `image_homography.py` oder `camera_model.py`.
+6. **ViewProvider** — tesselliertes Mesh, schwarze Ränder (UV außerhalb Domain).
+7. **Tests** — synthetisches verzerrtes Bild + bekanntes δ, Roundtrip inverse.
+
+Geplante Toolbar-Ergänzung: siehe [IMAGE_ALIGNMENT.md](IMAGE_ALIGNMENT.md).
+
+---

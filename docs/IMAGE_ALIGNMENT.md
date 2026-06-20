@@ -36,6 +36,8 @@ Optional vorab: **Aligned Image** (Coin-Darstellung). Overlay und Solver wandeln
 | Calibration Sketch | Sketch bearbeiten / neuen Sketch öffnen |
 | Calibration Constraints | Soll-Längen und Winkel-Bedingungen |
 | Calibration Solve | Bild kalibrieren, neuer Sketch |
+| *Kameramodell kalibrieren* | *geplant:* Display-Muster 16×8, Foto, `CameraModel` — [CAMERA_MODEL.md §13](CAMERA_MODEL.md#13-geplanter-freecad-workflow-display-muster) |
+| *Bild mit Entzerrung laden* | *geplant:* Foto + Entzerrung, rechteckiges `AlignedImage`, schwarze Ränder — [CAMERA_MODEL.md §13.5](CAMERA_MODEL.md#135-befehl-bild-mit-entzerrung-laden) |
 
 ---
 

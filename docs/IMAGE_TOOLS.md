@@ -122,6 +122,13 @@ Alle Befehle liegen in der Toolbar **Image** (`init_gui.py`).
 | **Image Overlay** | `image_overlay.svg` | Bilder überlagern | `overlay_images()` |
 | **Scale Solver** | `scale_solver.svg` | Metrische Kalibrierung | `solve_reference_lines()` |
 
+**Geplant (Kameramodell):** siehe [CAMERA_MODEL.md §13](CAMERA_MODEL.md#13-geplanter-freecad-workflow-display-muster).
+
+| Befehl (geplant) | Funktion |
+|------------------|----------|
+| **Kameramodell kalibrieren** | Display-Muster 16×8, Kalibrierfoto laden, δ speichern als `CameraModel` |
+| **Bild mit Entzerrung laden** | Arbeitsfoto + `CameraModel` → rechteckiges `AlignedImage`, B-Spline-UV, schwarze Ränder |
+
 Bilder werden zunächst mit **Draft → Insert Image** (`Image::ImagePlane`) geladen.
 
 ---

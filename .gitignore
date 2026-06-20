@@ -53,8 +53,6 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
-docs/pdf/.build.md
-docs/pdf/CALIBRATION_SOLVER.pdf
 
 # PyBuilder
 target/
