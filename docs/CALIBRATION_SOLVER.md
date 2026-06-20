@@ -81,6 +81,11 @@ Im Modus **`corners`** sind die Unbekannten die acht XY-Koordinaten der Ecken:
 Die Z-Koordinaten \((z_0, z_x, z_1, z_y)\) sind **fix** und stammen aus dem
 Ausgangszustand \(\mathbf{p}_0\).
 
+**Effektive Freiheitsgrade:** 8 Eckparameter minus 2 durch die
+Schwerpunkt-Nebenbedingung (Abschnitt 6) → **6** relevante DOF für die
+Entscheidung, ob Nebenbedingungen (\(E_{\mathrm{angle}}\), Translation) in die
+Optimierung eingehen.
+
 Aus \(\mathbf{p}\) und den fixen Z-Werten werden die Ecken-Vektoren
 \(\mathbf{c}_0, \mathbf{c}_x, \mathbf{c}_1, \mathbf{c}_y \in \mathbb{R}^3\)
 rekonstruiert und daraus \(H(\mathbf{p})\).
@@ -174,61 +179,67 @@ auf die Welt-XY-Richtung der projizierten Linie relativ zum festen Sketch.
 
 ---
 
-## 5. Verzerrungsenergie \(E_{\mathrm{dist}}\)
+## 5. Winkelerhaltung \(E_{\mathrm{angle}}\)
 
-Die Verzerrungsenergie misst, wie stark sich die **Kanten-Basis** des Quads
-gegenüber dem Ausgangszustand verformt.
+Nebenbedingung: an **jedem der vier Quad-Eckpunkte** \(c_0, c_x, c_1, c_y\)
+soll der **Innenwinkel** zwischen den beiden anliegenden Kanten unverändert
+bleiben (keine Scherung in der Bildebene).
 
-### 5.1 Kanten-Basis
+### 5.1 Kantenvektoren pro Ecke
+
+An jedem Eckpunkt werden die beiden inzidenten Kantenvektoren gebildet
+(nur XY). Beispiel \(c_0\):
 
 \[
-E(\mathbf{p}) =
-\begin{bmatrix} \mathbf{e}_u & \mathbf{e}_v \end{bmatrix}
-\in \mathbb{R}^{2 \times 2},
+\mathbf{e}_{u} = \mathbf{c}_x - \mathbf{c}_0,\qquad
+\mathbf{e}_{v} = \mathbf{c}_y - \mathbf{c}_0.
+\]
+
+Analog an \(c_x\) (\(\mathbf{c}_0-\mathbf{c}_x\), \(\mathbf{c}_1-\mathbf{c}_x\)),
+\(c_1\) und \(c_y\).
+
+Am Ausgang \(\mathbf{p}_0\) und nach der Optimierung \(\mathbf{p}\) für Ecke \(k\):
+
+\[
+\cos\alpha_k = \frac{\mathbf{e}_{k,1} \cdot \mathbf{e}_{k,2}}{\|\mathbf{e}_{k,1}\|\,\|\mathbf{e}_{k,2}\|},
 \qquad
-\mathbf{e}_u = \mathbf{c}_x - \mathbf{c}_0,\;
-\mathbf{e}_v = \mathbf{c}_y - \mathbf{c}_0
+\sin\alpha_k = \frac{(\mathbf{e}_{k,1})_x (\mathbf{e}_{k,2})_y - (\mathbf{e}_{k,1})_y (\mathbf{e}_{k,2})_x}{\|\mathbf{e}_{k,1}\|\,\|\mathbf{e}_{k,2}\|}.
 \]
 
-(nur XY-Komponenten). Entsprechend \(E_0 = E(\mathbf{p}_0)\), \(E_1 = E(\mathbf{p})\).
-
-### 5.2 Deformationsgradient in der Kanten-Basis
+### 5.2 Energie pro Ecke und gesamt
 
 \[
-F = E_1 \, E_0^{-1} \in \mathbb{R}^{2 \times 2}.
+E_{\mathrm{angle},k}(\mathbf{p})
+= (\cos\beta_k - \cos\alpha_k)^2 + (\sin\beta_k - \sin\alpha_k)^2,
+\qquad
+E_{\mathrm{angle}}(\mathbf{p}) = \sum_{k \in \{c_0,c_x,c_1,c_y\}} E_{\mathrm{angle},k}(\mathbf{p}).
 \]
 
-\(F\) beschreibt die affine Verformung der UV-Kantenvektoren vom Ausgang zum
-Zielzustand.
+\(E_{\mathrm{angle}} = 0\) genau dann, wenn **alle vier** Eckwinkel gleich
+geblieben sind.
 
-### 5.3 Normierte Energie
+**Interpretation:**
 
-\[
-\sigma = \sqrt{\det F}, \qquad F_n = \frac{F}{\sigma},
-\]
+| Verformung | \(E_{\mathrm{angle}}\) |
+|------------|-------------------------|
+| Skalierung entlang U/V (\(s_x \neq s_y\) erlaubt) | \(0\) |
+| Gemeinsame Rotation aller Ecken | \(0\) |
+| Scherung / Perspektiv-Verzerrung an mindestens einer Ecke | \(> 0\) |
 
-\[
-E_{\mathrm{dist}}(\mathbf{p}) = \| F_n - I \|_F^2
-= \sum_{i,j} \bigl( (F_n)_{ij} - \delta_{ij} \bigr)^2.
-\]
-
-**Interpretation (Implementierung):**
-
-| Eigenschaft von \(F\) | \(E_{\mathrm{dist}}\) |
-|------------------------|------------------------|
-| Reine gleichförmige Skalierung: \(F = s\, I\) | \(0\) |
-| Unterschiedliche Skalierung in U/V oder Scherung | \(> 0\) |
-| Rotation \(F = R\) (\(\det R = 1\), \(R \neq I\)) | \(> 0\) |
-
-Die Energie bestraft damit Abweichung von **isotroper Skalierung in der
-Kanten-Basis**, nicht allgemeine „Winkel-Erhaltung“ in der Ebene.
+Im Residualvektor: je Ecke \(\sqrt{E_{\mathrm{angle},k}}\) (Funktionen
+`_angle_preserving_energy_per_corner`, Summe in `_angle_preserving_energy`;
+`distortion_energy` im Report ist ein Alias für die Summe).
 
 ---
 
-## 6. Strafe für starre Translation
+## 6. Strafe für starre Translation (Nebenbedingung)
 
 Zur Auswahl unter längen-kompatiblen Lösungen wird die Verschiebung des
-Eck-Schwerpunkts bestraft.
+Eck-Schwerpunkts bestraft. Das entspricht der Neigung, den Quad-Schwerpunkt
+nahe der Ausgangslage zu halten, und **reduziert die effektiven Freiheitsgrade
+um 2** (Translation in \(x\) und \(y\)). Zusammen mit den 8 Eckparametern
+bleiben damit **6** unabhängige Freiheitsgrade für die Rang-Entscheidung
+(Abschnitt 7.1).
 
 Sei \(P_0, P_1 \in \mathbb{R}^{4 \times 2}\) die XY-Matrizen der vier Ecken
 (vor/nach). Schwerpunkte:
@@ -262,21 +273,38 @@ mit `scipy.optimize.least_squares` (Trust-Region-Reflective).
 
 ### 7.1 Zusammensetzung
 
+Primäre Restfehler (Längen, Winkel) sind immer enthalten. Die Winkelerhaltung
+\(E_{\mathrm{angle}}\) ist **immer** in \(\mathbf{r}\) (gewichtet wie die
+Winkel-Bedingungen, \(w = w_a = w_E\)). Die Schwerpunkt-Nebenbedingung
+\(\Delta t\) wird **nur bei Unterbestimmung** angehängt (Rang der primären
+Jacobian-Matrix \(< 6\)).
+
 \[
 \mathbf{r}(\mathbf{p}) =
 \begin{bmatrix}
 \mathbf{r}^{\mathrm{len}} / \tau_L \\
-w_a \cdot \mathbf{r}^{\mathrm{ang}} / \tau_a \\
-\sqrt{E_{\mathrm{dist}}(\mathbf{p})} \\
-\Delta t / \tau_t
+w \cdot \mathbf{r}^{\mathrm{ang}} / \tau_a \\
+w \sqrt{E_{\mathrm{angle},c_0}(\mathbf{p})} \\
+w \sqrt{E_{\mathrm{angle},c_x}(\mathbf{p})} \\
+w \sqrt{E_{\mathrm{angle},c_1}(\mathbf{p})} \\
+w \sqrt{E_{\mathrm{angle},c_y}(\mathbf{p})} \\
+\mathbf{1}_{\mathrm{rank} < 6}\,\Delta t / \tau_t
 \end{bmatrix}.
 \]
+
+**Rang-Bestimmung:** Am Startpunkt \(\mathbf{p}_0\) wird die Jacobian-Matrix
+\(J = \partial \mathbf{r}^{\mathrm{prim}} / \partial \mathbf{p}\) numerisch
+gebildet (\(\mathbf{r}^{\mathrm{prim}}\) = Längen- und Winkel-Restfehler ohne
+Skalierung). Der Rang wird per SVD mit Toleranz
+\(\max(10^{-10},\,10^{-8}\,\sigma_1)\) bestimmt. Bei \(\mathrm{rank} \geq 6\)
+(gelöst oder überbestimmt in den **6 effektiven** Freiheitsgraden) entfällt
+nur \(\Delta t\) in der Optimierung; \(E_{\mathrm{angle}}\) bleibt aktiv.
 
 | Symbol | Wert (Code) | Bedeutung |
 |--------|-------------|-----------|
 | \(\tau_L\) | `0.01` mm | Längen-Toleranz-Skalierung |
 | \(\tau_a\) | \(\sin(1°)\) | Winkel-Toleranz (über Sinus) |
-| \(w_a\) | `25.0` | Gewicht der Winkel-Restfehler |
+| \(w\) | `25.0` | Gewicht für \(\mathbf{r}^{\mathrm{ang}}/\tau_a\) und \(\sqrt{E_{\mathrm{angle},k}}\) |
 | \(\tau_t\) | `1.0` mm | Translation-Toleranz |
 
 Die Winkel-Restfehler \(\mathbf{r}^{\mathrm{ang}}\) werden nur angehängt, wenn
@@ -297,10 +325,11 @@ Sketch-Constraints und `line_by_geo` übergeben werden.
 **Auslöser:** genau **eine** Soll-Länge und **keine** Winkel-Bedingungen
 (`_can_use_uniform_scale_solver`).
 
-Statt `least_squares` wird analytisch skaliert. Der UV-Ursprung \(c_0\) bleibt fix:
+Statt `least_squares` wird analytisch skaliert. Der Quad-Schwerpunkt \(\mathbf{g}_0\)
+bleibt fix:
 
 \[
-\mathbf{c}_k' = \mathbf{c}_0 + s\,(\mathbf{c}_k - \mathbf{c}_0),
+\mathbf{c}_k' = \mathbf{g}_0 + s\,(\mathbf{c}_k - \mathbf{g}_0),
 \qquad k \in \{0, x, 1, y\}.
 \]
 
@@ -310,12 +339,47 @@ Skalenfaktor aus der einzigen Längenbedingung:
 s = \frac{L^{\mathrm{soll}}}{\hat{L}\!\left(H(\mathbf{p}_0);\, \ell\right)}.
 \]
 
-In diesem Modus ist \(E_{\mathrm{dist}} = 0\) (reine Ähnlichkeit um \(c_0\)).
+In diesem Modus ist \(E_{\mathrm{angle}} = 0\) (alle Eckwinkel unverändert).
 Es gibt keinen Optimierungs-Residualvektor; `cost = 0`, `success = True`.
 
 ---
 
-## 9. Entscheidungslogik (aktueller Solver)
+## 9. Zwei-Phasen-Lösung: UV-Skalierung + Ecken (Modus `corners` mit Warmstart)
+
+**Auslöser:** genau **zwei** Soll-Längen und **keine** Winkel-Bedingungen
+(`_can_use_uv_scale_warm_start`).
+
+### Phase 1 — unabhängige Skalierung entlang U/V
+
+Pivot im UV-Parameterraum \((u,v) = (0{,}5, 0{,}5)\) am Quad-Schwerpunkt
+\(\mathbf{g}_0\). Mit \(\mathbf{e}_u = \mathbf{c}_x - \mathbf{c}_0\),
+\(\mathbf{e}_v = \mathbf{c}_y - \mathbf{c}_0\) und Parametern \(s_x, s_y\):
+
+\[
+\mathbf{p}'(u,v) = \mathbf{g}_0 + s_x (u - 0{,}5)\,\mathbf{e}_u
+  + s_y (v - 0{,}5)\,\mathbf{e}_v,
+\qquad (u,v) \in \{(0,0), (1,0), (1,1), (0,1)\}.
+\]
+
+Kanten bleiben \(s_x \mathbf{e}_u\) und \(s_y \mathbf{e}_v\); Schwerpunkt und alle
+Eckwinkel bleiben unverändert (\(E_{\mathrm{angle}} = 0\)). Es wird
+`least_squares` nur auf \((s_x, s_y)\) mit den skalierten Längen-Restfehlern
+\(\mathbf{r}^{\mathrm{len}} / \tau_L\) ausgeführt.
+
+### Phase 2 — volle Eckoptimierung
+
+Startpunkt \(\mathbf{p}_1 = \mathbf{p}(s_x, s_y)\) aus Phase 1; danach wie bisher
+`least_squares` auf alle 8 Eck-Koordinaten mit vollem Residualvektor (Längen,
+optional Winkel, \(\sqrt{E_{\mathrm{angle},k}}\), \(\Delta t\)).
+
+Phase 2 dient der Verfeinerung und für Fälle, in denen Phase 1 die Längen noch
+nicht exakt trifft; bei kompatiblen Zielen bleibt \(E_{\mathrm{angle}} \approx 0\).
+
+Im Report: `uv_scale_warm_start`, `scale_sx`, `scale_sy`, `uv_scale_nfev`.
+
+---
+
+## 10. Entscheidungslogik (aktueller Solver)
 
 ```
 compute_calibration_from_specs / compute_calibration_corners
@@ -323,33 +387,39 @@ compute_calibration_from_specs / compute_calibration_corners
         v
    _solve_corner_calibration
         |
-        +- 1 Länge, keine Winkel? -> uniform_scale (analytisch)
+        +- Phase 1: uniform_scale (1D) — immer
+        |      Abbruch wenn max |ΔL| < τ_L, E_angle ≈ 0 (nur ohne Winkel-Bedingungen)
         |
-        +- sonst -> least_squares auf p in R^8
-                      Residuen: Längen + Winkel + sqrt(E_dist) + Delta t
+        +- Phase 2: uv_scale (2D, sx/sy) — immer auf Phase-1-Ergebnis
+        |      Abbruch wenn max |ΔL| < τ_L, E_angle ≈ 0 (nur ohne Winkel-Bedingungen)
+        |
+        +- Phase 3: least_squares auf p ∈ R^8 (Ecken)
+               Residuen: Längen + Winkel + w·√E_angle + [Δt]
 ```
 
-Es existieren damit **zwei** Lösungspfade mit unterschiedlicher Parametrisierung;
-der allgemeine Pfad erlaubt beliebige Quad-Verformungen (inkl. Scherung).
+Bei **Winkel-Bedingungen** laufen alle drei Phasen; Early-Exit nach Phase 1/2 entfällt
+(Warmstart bis Phase 3).
 
 ---
 
-## 10. Typische Constraint-Fälle
+## 11. Typische Constraint-Fälle
 
 | Konfiguration | Erwartetes Verhalten (Stand heute) |
 |---------------|-------------------------------------|
-| 1 Soll-Länge | `uniform_scale`, \(E_{\mathrm{dist}} = 0\) |
-| 1 Länge + Winkel (z. B. horizontal) | `corners`, `least_squares`; Winkel gewichtet; \(E_{\mathrm{dist}}\) und \(\Delta t\) als Tie-Breaker |
-| 2 Längen auf U-/V-Kanten | `corners`; anisotrope Skalierung nötig → \(E_{\mathrm{dist}} > 0\) typisch |
-| Viele Längen + Winkel (überbestimmt) | Längen- und Winkel-Terme dominieren; \(E_{\mathrm{dist}}\) und \(\Delta t\) sollten das Ergebnis kaum verschieben |
+| 1 Soll-Länge | `uniform_scale`, \(E_{\mathrm{angle}} = 0\) |
+| 2 Soll-Längen, keine Winkel | Kaskade 1D→2D; Abbruch in Phase 2 wenn exakt (`uv_scale`), sonst Phase 3 |
+| 1 Länge + Winkel (z. B. horizontal) | `corners`, `least_squares`; Winkel gewichtet; \(E_{\mathrm{angle}}\) und \(\Delta t\) als Tie-Breaker |
+| 2 Längen + Winkel | `corners` ab Ausgang (kein UV-Warmstart) |
+| Viele Längen + Winkel (überbestimmt) | Längen- und Winkel-Terme dominieren; \(\Delta t\) entfällt bei Rang \(\geq 6\); \(E_{\mathrm{angle}}\) bleibt aktiv |
 
-Bei **unterbestimmten** Systemen (wenige Gleichungen, viele Freiheitsgrade)
-bestimmen \(\sqrt{E_{\mathrm{dist}}}\) und \(\Delta t\) die Lösung unter den
-längen-treuen Alternativen mit.
+Bei **unterbestimmten** Systemen ohne UV-Warmstart bestimmen
+\(\sqrt{E_{\mathrm{angle},k}}\) und \(\Delta t\) die Lösung unter den
+längen-treuen Alternativen — der reine 8-Parameter-Start kann in Scher-Minima
+laufen (siehe Residual-Plot `tests/plot_align_image_test_1_residuals.py`).
 
 ---
 
-## 11. Anwendung der Lösung (Kurzüberblick)
+## 12. Anwendung der Lösung (Kurzüberblick)
 
 Nach dem Solve:
 
@@ -361,30 +431,31 @@ Nach dem Solve:
 
 ---
 
-## 12. Implementierungsreferenzen
+## 13. Implementierungsreferenzen
 
 | Konzept | Funktion | Datei |
 |---------|----------|-------|
 | Homographie aus Ecken | `compute_homography`, `_homography_from_corners` | `image_homography.py` |
 | Länge in UV | `_line_length_uv` | `image_homography.py` |
 | Richtung / Parallel-Sinus | `_direction_xy_from_uv_line`, `_parallel_sin_xy` | `image_homography.py` |
-| Verzerrungsenergie | `_distortion_energy` | `image_constraint_solver.py` |
+| Winkelerhaltung \(E_{\mathrm{angle}}\) (Summe) | `_angle_preserving_energy` | `image_constraint_solver.py` |
+| Winkelerhaltung pro Ecke | `_angle_preserving_energy_per_corner` | `image_constraint_solver.py` |
 | Residualvektor | `_calibration_residuals` | `image_constraint_solver.py` |
 | Uniform-Scale | `_solve_uniform_scale_calibration` | `image_constraint_solver.py` |
+| UV-Skalierung Phase 1 | `_solve_uv_scale_phase`, `_uv_scale_params` | `image_constraint_solver.py` |
 | Allgemeiner Solve | `_solve_corner_calibration` | `image_constraint_solver.py` |
 | Einstieg (Tests/UI) | `compute_calibration_from_specs` | `image_constraint_solver.py` |
 
 ---
 
-## 13. Hinweise / offene Punkte
+## 14. Hinweise / offene Punkte
 
 1. **Zwei Solver-Pfade:** `uniform_scale` und `corners` verwenden unterschiedliche
    Parametrisierungen; eine einheitliche niedrigdimensionale Parametrisierung
    (z. B. Skala/Rotation ohne Scherung) ist derzeit nicht implementiert.
 
-2. **\(E_{\mathrm{dist}}\) vs. Winkel-Erhaltung:** \(E_{\mathrm{dist}} = 0\) bedeutet
-   isotrope Skalierung in der Kanten-Basis, nicht allgemeine Ähnlichkeitstransformation
-   der Ebene (Rotation erzeugt \(E_{\mathrm{dist}} > 0\)).
+2. **\(E_{\mathrm{angle}}\):** Null genau wenn der U/V-Winkel an \(c_0\) erhalten
+   bleibt; erlaubt unterschiedliche Skalierung in U und V ohne Scherung.
 
 3. **Sketch-Placement:** Horizontal/Senkrecht beziehen sich auf feste Sketch-Achsen;
    das Bild wird allein über Eckverschiebungen ausgerichtet.

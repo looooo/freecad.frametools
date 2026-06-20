@@ -20,13 +20,21 @@ REF_LINE_ENDPOINT_SNAP_MM = 5.0
 _CALIB_LENGTH_TOLERANCE_MM = 0.01
 _CALIB_RIGID_TRANSLATION_TOLERANCE_MM = 1.0
 _CALIB_ANGLE_TOLERANCE_RAD = np.sin(np.deg2rad(1.0))
-_CALIB_AXIS_ALIGNMENT_WEIGHT = 25.0
+_CALIB_ANGLE_WEIGHT = 25.0
+# Sketch angle constraints and E_angle side terms share this weight.
+_CALIB_AXIS_ALIGNMENT_WEIGHT = _CALIB_ANGLE_WEIGHT
 _CALIB_SOLVER_FTOL = 1e-6
 _CALIB_SOLVER_XTOL = 1e-6
 _CALIB_SOLVER_GTOL = 1e-6
 _CALIB_SOLVER_MAX_NFEV = 250
 _CALIB_SOLVER_REFINE_FTOL = 1e-9
 _CALIB_SOLVER_REFINE_MAX_NFEV = 100
+_CORNER_PARAM_DOF = 8
+# Centroid translation penalty fixes 2 DOF in the tie-breaker → 6 effective DOF.
+_CORNER_EFFECTIVE_DOF = _CORNER_PARAM_DOF - 2
+_JACOBIAN_RANK_RTOL = 1e-8
+_JACOBIAN_RANK_ATOL = 1e-10
+_JACOBIAN_FD_EPS = 1e-7
 
 
 def _has_angle_constraints(constraints):
@@ -208,27 +216,396 @@ def _quad_edge_basis(params, z_vals):
     e_u = np.array([cx.x - c0.x, cx.y - c0.y], dtype=float)
     e_v = np.array([cy.x - c0.x, cy.y - c0.y], dtype=float)
     return np.column_stack([e_u, e_v])
+_CORNER_ANGLE_LABELS = ("c0", "cx", "c1", "cy")
+
+
+def _corner_edge_pairs(corners):
+    """Two incident edge vectors at each quad corner (XY only)."""
+    c0, cx, c1, cy = corners
+
+    def leg(a, b):
+        return np.array([b.x - a.x, b.y - a.y], dtype=float)
+
+    return (
+        (leg(c0, cx), leg(c0, cy)),
+        (leg(cx, c0), leg(cx, c1)),
+        (leg(c1, cx), leg(c1, cy)),
+        (leg(cy, c0), leg(cy, c1)),
+    )
+
+
+def _edge_pair_angle_sin_cos(e_a, e_b):
+    """Unit-independent sin/cos of the angle between two edge vectors."""
+    na = float(np.linalg.norm(e_a))
+    nb = float(np.linalg.norm(e_b))
+    if na < 1e-12 or nb < 1e-12:
+        return None
+    cos_a = float(np.dot(e_a, e_b) / (na * nb))
+    sin_a = float((e_a[0] * e_b[1] - e_a[1] * e_b[0]) / (na * nb))
+    return cos_a, sin_a
+
+
+def _corner_angle_energy(e_a0, e_b0, e_a1, e_b1):
+    tri0 = _edge_pair_angle_sin_cos(e_a0, e_b0)
+    tri1 = _edge_pair_angle_sin_cos(e_a1, e_b1)
+    if tri0 is None or tri1 is None:
+        return 1e12
+    c0, s0 = tri0
+    c1, s1 = tri1
+    return (c1 - c0) ** 2 + (s1 - s0) ** 2
+
+
+def _angle_preserving_energy_per_corner(params, params0, z_vals):
+    """Side energy at each quad corner: zero when that interior angle is unchanged."""
+    corners0 = hg._corners_from_xy_params(params0, z_vals)
+    corners1 = hg._corners_from_xy_params(params, z_vals)
+    pairs0 = _corner_edge_pairs(corners0)
+    pairs1 = _corner_edge_pairs(corners1)
+    return [
+        _corner_angle_energy(a0, b0, a1, b1)
+        for (a0, b0), (a1, b1) in zip(pairs0, pairs1)
+    ]
+
+
+def _angle_preserving_energy(params, params0, z_vals):
+    """Sum of per-corner angle energies (see _angle_preserving_energy_per_corner)."""
+    return float(sum(_angle_preserving_energy_per_corner(params, params0, z_vals)))
+
+
+def _angle_energy_side_residuals(params, params0, z_vals):
+    """Weighted sqrt(E_angle,k) terms; always included in corner calibration.
+
+    Uses the same weight constant w as sketch angle constraints; E is
+    dimensionless so no extra 1/τ_L-style divisor on top of w.
+    """
+    w = _CALIB_ANGLE_WEIGHT
+    return np.array([
+        w * np.sqrt(max(E_k, 0.0))
+        for E_k in _angle_preserving_energy_per_corner(params, params0, z_vals)
+    ], dtype=float)
+
+
+def _corner_interior_angles_deg(params, z_vals):
+    angles = []
+    for e_a, e_b in _corner_edge_pairs(hg._corners_from_xy_params(params, z_vals)):
+        tri = _edge_pair_angle_sin_cos(e_a, e_b)
+        if tri is None:
+            angles.append(None)
+        else:
+            cos_a, sin_a = tri
+            angles.append(float(np.degrees(np.arctan2(sin_a, cos_a))))
+    return angles
+
+
+def _uv_basis_angle_deg(params, z_vals):
+    """Interior angle at c0 (backward-compatible alias)."""
+    angles = _corner_interior_angles_deg(params, z_vals)
+    return angles[0] if angles else None
+
+
+def _angle_energy_report(params, params0, z_vals):
+    corner_energies = _angle_preserving_energy_per_corner(params, params0, z_vals)
+    angles = _corner_interior_angles_deg(params, z_vals)
+    angles0 = _corner_interior_angles_deg(params0, z_vals)
+    E = float(sum(corner_energies))
+    return {
+        "angle_preserving_energy": E,
+        "distortion_energy": E,
+        "corner_angle_energies": corner_energies,
+        "corner_angles_deg": angles,
+        "corner_angles_deg0": angles0,
+        "uv_corner_angle_deg": angles[0] if angles else None,
+        "uv_corner_angle_deg0": angles0[0] if angles0 else None,
+    }
+
+
 def _distortion_energy(params, params0, z_vals):
-    """Zero for uniform scale; positive for anisotropic stretch or shear."""
-    E0 = _quad_edge_basis(params0, z_vals)
-    E1 = _quad_edge_basis(params, z_vals)
-    det0 = np.linalg.det(E0)
-    if abs(det0) < 1e-12:
-        return 1e12
-    F = E1 @ np.linalg.inv(E0)
-    det_f = float(np.linalg.det(F))
-    if det_f <= 1e-12:
-        return 1e12
-    sigma = np.sqrt(det_f)
-    Fn = F / sigma
-    return float(np.sum(np.square(Fn - np.eye(2))))
+    """Backward-compatible alias for angle-preserving side energy."""
+    return _angle_preserving_energy(params, params0, z_vals)
+
+
+def _primary_calibration_residuals(
+        params, specs, z_vals, constraints=None, line_by_geo=None,
+        sketch=None):
+    """Length and angle constraint values only (mm / sin / dot)."""
+    H = hg._homography_from_xy_params(params, z_vals)
+    parts = list(_length_residuals_for_specs(specs, H))
+    if constraints is not None and line_by_geo is not None:
+        parts.extend(_angle_residuals_for_constraints(
+            constraints, line_by_geo, H, sketch=sketch))
+    if not parts:
+        return np.zeros(0, dtype=float)
+    return np.asarray(parts, dtype=float)
+
+
+def _numerical_jacobian(func, x0, eps=_JACOBIAN_FD_EPS):
+    x0 = np.asarray(x0, dtype=float)
+    r0 = func(x0)
+    n = x0.size
+    J = np.zeros((r0.size, n), dtype=float)
+    for j in range(n):
+        x = x0.copy()
+        x[j] += eps
+        J[:, j] = (func(x) - r0) / eps
+    return J
+
+
+def _matrix_rank(J, rtol=_JACOBIAN_RANK_RTOL, atol=_JACOBIAN_RANK_ATOL):
+    if J.size == 0:
+        return 0
+    s = np.linalg.svd(J, compute_uv=False)
+    if s.size == 0 or s[0] == 0.0:
+        return 0
+    tol = max(atol, rtol * float(s[0]))
+    return int(np.sum(s > tol))
+
+
+def _primary_constraint_rank(
+        params0, specs, z_vals, constraints=None, line_by_geo=None,
+        sketch=None):
+    """Rank of primary constraint Jacobian at *params0*.
+
+    Returns (rank, n_primary, include_translation_side).
+    Centroid translation is appended only when rank < effective DOF (6).
+    E_angle side terms are always included in the residual vector.
+    """
+
+    def func(params):
+        return _primary_calibration_residuals(
+            params, specs, z_vals,
+            constraints=constraints, line_by_geo=line_by_geo,
+            sketch=sketch)
+
+    n_primary = int(func(params0).size)
+    if n_primary == 0:
+        return 0, 0, True
+    J = _numerical_jacobian(func, params0)
+    rank = _matrix_rank(J)
+    include_translation = rank < _CORNER_EFFECTIVE_DOF
+    return rank, n_primary, include_translation
+
+
+def _determinacy_label(rank, n_primary, effective_dof=_CORNER_EFFECTIVE_DOF):
+    """Classify primary constraint system at the start point."""
+    if rank < effective_dof:
+        return "unterbestimmt"
+    if n_primary > effective_dof:
+        return "überbestimmt"
+    return "bestimmt"
+
+
+def _count_angle_constraints(constraints, line_by_geo):
+    if not constraints or not line_by_geo:
+        return 0
+    n = 0
+    for item in constraints.get("parallel", []):
+        ga, gb = _constraint_line_pair(item)
+        if ga in line_by_geo and gb in line_by_geo:
+            n += 1
+    for item in constraints.get("perpendicular", []):
+        ga, gb = _constraint_line_pair(item)
+        if ga in line_by_geo and gb in line_by_geo:
+            n += 1
+    for key in ("horizontal", "vertical"):
+        for item in constraints.get(key, []):
+            if _constraint_line_index(item) in line_by_geo:
+                n += 1
+    return n
+
+
+def _solver_diagnostics_meta(
+        rank, n_primary, include_translation, mode,
+        n_lengths=None, n_angles=None):
+    det = _determinacy_label(rank, n_primary)
+    return {
+        "mode": mode,
+        "constraint_rank": rank,
+        "primary_constraint_count": n_primary,
+        "corner_param_dof": _CORNER_PARAM_DOF,
+        "effective_dof": _CORNER_EFFECTIVE_DOF,
+        "include_side_terms": include_translation,
+        "include_translation_side": include_translation,
+        "include_distortion_energy": True,
+        "determinacy": det,
+        "n_length_constraints": n_lengths,
+        "n_angle_constraints": n_angles,
+    }
+
+
+_LEAST_SQUARES_STATUS_LABELS = {
+    -1: "ungültige Eingabe",
+    0: "max. Funktionsauswertungen (max_nfev)",
+    1: "gtol erreicht",
+    2: "ftol erreicht",
+    3: "xtol erreicht",
+    4: "ftol und xtol erreicht",
+}
+
+
+def _least_squares_status_text(status):
+    try:
+        code = int(status)
+    except (TypeError, ValueError):
+        return str(status)
+    label = _LEAST_SQUARES_STATUS_LABELS.get(code)
+    if label:
+        return "{} ({})".format(label, code)
+    return "Status {}".format(code)
+
+
+def _print_solver_diagnostics(meta=None, opt_info=None, constraints=None,
+                              line_by_geo=None):
+    """Debug block: rank, determinacy, side terms, optimizer metrics."""
+    if meta is None:
+        return
+    App.Console.PrintMessage("\n=== Solver-Diagnose ===\n")
+    mode = meta.get("mode", "?")
+    mode_labels = {
+        "corners": "Eckpunkt-Optimierung (least_squares)",
+        "uniform_scale": "Einheitliche Skalierung (1D)",
+        "uv_scale": "UV-Skalierung sx/sy (2D)",
+    }
+    App.Console.PrintMessage(
+        "  Modus: {}\n".format(mode_labels.get(mode, mode)))
+
+    n_len = meta.get("n_length_constraints")
+    n_ang = meta.get("n_angle_constraints")
+    if n_len is None and constraints is not None:
+        n_len = len(constraints.get("lengths", []))
+    if n_ang is None and constraints is not None and line_by_geo is not None:
+        n_ang = _count_angle_constraints(constraints, line_by_geo)
+    if n_len is not None or n_ang is not None:
+        App.Console.PrintMessage(
+            "  Primäre Bedingungen: {} ({} Längen, {} Winkel)\n".format(
+                meta.get("primary_constraint_count", "?"),
+                n_len if n_len is not None else "?",
+                n_ang if n_ang is not None else "?"))
+
+    rank = meta.get("constraint_rank")
+    n_primary = meta.get("primary_constraint_count")
+    eff = meta.get("effective_dof", _CORNER_EFFECTIVE_DOF)
+    param_dof = meta.get("corner_param_dof", _CORNER_PARAM_DOF)
+    if rank is not None:
+        App.Console.PrintMessage(
+            "  Jacobian-Rang: {} / {} Gleichungen "
+            "({} Eckparameter, {} eff. DOF)\n".format(
+                rank, n_primary, param_dof, eff))
+    det = meta.get("determinacy")
+    if det:
+        App.Console.PrintMessage("  Bestimmtheit: {}\n".format(det))
+    if "include_translation_side" in meta or "include_side_terms" in meta:
+        trans = meta.get(
+            "include_translation_side", meta.get("include_side_terms"))
+        App.Console.PrintMessage(
+            "  Winkelerhaltung E_angle in Optimierung: ja\n")
+        App.Console.PrintMessage(
+            "  Schwerpunkt-Nebenbedingung in Optimierung: {}\n".format(
+                "ja" if trans else "nein"))
+
+    if meta.get("stop_phase"):
+        App.Console.PrintMessage(
+            "  Abbruch nach Phase: {}\n".format(meta["stop_phase"]))
+    if mode == "uniform_scale" and meta.get("scale_factor") is not None:
+        App.Console.PrintMessage(
+            "  Skalenfaktor: {:.6f}\n".format(meta["scale_factor"]))
+    elif mode == "uniform_scale" and opt_info and opt_info.get("scale_factor"):
+        App.Console.PrintMessage(
+            "  Skalenfaktor: {:.6f}\n".format(opt_info["scale_factor"]))
+    elif mode == "uv_scale" and meta.get("scale_sx") is not None:
+        App.Console.PrintMessage(
+            "  UV-Skalierung: sx = {:.6f}, sy = {:.6f}\n".format(
+                meta.get("scale_sx", 0.0), meta.get("scale_sy", 0.0)))
+    if meta.get("uniform_scale_factor") is not None and mode != "uniform_scale":
+        App.Console.PrintMessage(
+            "  Phase 1 (uniform): s = {:.6f}\n".format(
+                meta["uniform_scale_factor"]))
+    if meta.get("uv_scale_warm_start"):
+        App.Console.PrintMessage(
+            "  UV-Warmstart: sx = {:.6f}, sy = {:.6f} "
+            "(success = {}, nfev = {})\n".format(
+                meta.get("scale_sx", 0.0),
+                meta.get("scale_sy", 0.0),
+                meta.get("uv_scale_success"),
+                meta.get("uv_scale_nfev")))
+
+    if opt_info is not None:
+        App.Console.PrintMessage("  Optimierung:\n")
+        App.Console.PrintMessage(
+            "    success = {}, cost = {:.6e}\n".format(
+                opt_info.get("success", True),
+                opt_info.get("cost", 0.0)))
+        if "nfev" in opt_info:
+            App.Console.PrintMessage(
+                "    nfev = {}\n".format(opt_info["nfev"]))
+        if "status" in opt_info:
+            App.Console.PrintMessage(
+                "    {}\n".format(
+                    _least_squares_status_text(opt_info["status"])))
+        if opt_info.get("message"):
+            App.Console.PrintMessage(
+                "    message: {}\n".format(opt_info["message"]))
+        if opt_info.get("refined"):
+            App.Console.PrintMessage("    Verfeinerung: ja\n")
+        elif mode == "corners":
+            App.Console.PrintMessage("    Verfeinerung: nein\n")
+
+    if meta.get("angle_preserving_energy") is not None:
+        App.Console.PrintMessage(
+            "  Winkelerhaltung E_angle gesamt = {:.6e} "
+            "(0 = alle Eckwinkel unverändert)\n".format(
+                meta["angle_preserving_energy"]))
+        corner_energies = meta.get("corner_angle_energies")
+        if corner_energies:
+            for label, E_k in zip(_CORNER_ANGLE_LABELS, corner_energies):
+                App.Console.PrintMessage(
+                    "    E_angle {} = {:.6e}\n".format(label, E_k))
+        angles0 = meta.get("corner_angles_deg0")
+        angles1 = meta.get("corner_angles_deg")
+        if angles0 and angles1:
+            for label, a0, a1 in zip(
+                    _CORNER_ANGLE_LABELS, angles0, angles1):
+                if a0 is not None and a1 is not None:
+                    App.Console.PrintMessage(
+                        "    Winkel {}: {:.3f}° → {:.3f}° "
+                        "(Δ {:+.3f}°)\n".format(label, a0, a1, a1 - a0))
+        elif meta.get("uv_corner_angle_deg0") is not None:
+            a0 = meta.get("uv_corner_angle_deg0")
+            a1 = meta.get("uv_corner_angle_deg")
+            App.Console.PrintMessage(
+                "  U/V-Winkel an c0: {:.3f}° → {:.3f}° "
+                "(Δ {:+.3f}°)\n".format(a0, a1, a1 - a0))
+    elif meta.get("distortion_energy") is not None:
+        App.Console.PrintMessage(
+            "  Winkelerhaltung E_angle = {:.6e}\n".format(
+                meta["distortion_energy"]))
+    rigid = meta.get("rigid_motion")
+    if rigid:
+        App.Console.PrintMessage(
+            "  Starre Bewegung: Δ = {:.4f} mm, θ = {:.4f}°\n".format(
+                rigid.get("translation_mm", 0.0),
+                rigid.get("rotation_deg", 0.0)))
+    move = meta.get("corner_move")
+    if move:
+        App.Console.PrintMessage(
+            "  Eck-Verschiebung: max = {:.4f} mm, rms = {:.4f} mm\n".format(
+                move.get("max_mm", 0.0), move.get("rms_mm", 0.0)))
+    if meta.get("exact") is not None:
+        App.Console.PrintMessage(
+            "  Längen exakt (< {:.3f} mm): {}\n".format(
+                _CALIB_LENGTH_TOLERANCE_MM, meta.get("exact")))
+
+
 def _calibration_residuals(
         params, specs, params0, z_vals, constraints=None, line_by_geo=None,
-        sketch=None):
+        sketch=None, include_side_terms=True):
+    """Build full residual vector.
+
+    *include_side_terms* controls centroid translation only; E_angle is always
+    included with weight w_E (same as sketch angle constraints w_a).
+    """
     H = hg._homography_from_xy_params(params, z_vals)
     length_res = np.asarray(_length_residuals_for_specs(specs, H), dtype=float)
     length_part = length_res / _CALIB_LENGTH_TOLERANCE_MM
-    E = _distortion_energy(params, params0, z_vals)
     rigid = _rigid_motion_stats(params, params0, z_vals)
     rigid_part = np.array([
         rigid["translation_mm"] / _CALIB_RIGID_TRANSLATION_TOLERANCE_MM,
@@ -241,9 +618,10 @@ def _calibration_residuals(
             parts.append(
                 np.asarray(angle_res, dtype=float)
                 / _CALIB_ANGLE_TOLERANCE_RAD
-                * _CALIB_AXIS_ALIGNMENT_WEIGHT)
-    parts.append(np.array([np.sqrt(max(E, 0.0))], dtype=float))
-    parts.append(rigid_part)
+                * _CALIB_ANGLE_WEIGHT)
+    parts.append(_angle_energy_side_residuals(params, params0, z_vals))
+    if include_side_terms:
+        parts.append(rigid_part)
     return np.concatenate(parts)
 
 
@@ -276,6 +654,9 @@ def _print_calibration_constraint_report(
         constraints, line_by_geo, H, length_specs, sketch=None,
         meta=None, opt_info=None):
     """Report residual error for every active calibration constraint."""
+    _print_solver_diagnostics(
+        meta=meta, opt_info=opt_info,
+        constraints=constraints, line_by_geo=line_by_geo)
     App.Console.PrintMessage("\n=== Bedingungen nach Kalibrierung ===\n")
 
     max_len_delta = 0.0
@@ -367,28 +748,11 @@ def _print_calibration_constraint_report(
             "(Toleranz {:.1f}°)\n".format(
                 max_angle_delta, np.degrees(np.arcsin(_CALIB_ANGLE_TOLERANCE_RAD))))
     if meta is not None:
-        rigid = meta.get("rigid_motion", {})
-        App.Console.PrintMessage(
-            "  Verzerrungsenergie E = {:.4e}\n".format(
-                meta.get("distortion_energy", 0.0)))
-        App.Console.PrintMessage(
-            "  Starre Bewegung: Δ = {:.3f} mm, θ = {:.3f}°\n".format(
-                rigid.get("translation_mm", 0.0),
-                rigid.get("rotation_deg", 0.0)))
         if "exact" in meta:
             App.Console.PrintMessage(
                 "  Längen exakt (< {:.3f} mm): {}\n".format(
                     _CALIB_LENGTH_TOLERANCE_MM, meta.get("exact", False)))
-        move = meta.get("corner_move")
-        if move:
-            App.Console.PrintMessage(
-                "  Eck-Verschiebung: max={:.4f} mm, rms={:.4f} mm\n".format(
-                    move.get("max_mm", 0.0), move.get("rms_mm", 0.0)))
-    if opt_info is not None:
-        App.Console.PrintMessage(
-            "  Optimierung: cost={:.6e}, success={}\n".format(
-                opt_info.get("cost", 0.0), opt_info.get("success", True)))
-        res = opt_info.get("residuals")
+        res = opt_info.get("residuals") if opt_info else None
         if res is not None and length_specs:
             parts = []
             for spec, r in zip(length_specs, res):
@@ -400,59 +764,255 @@ def _print_calibration_constraint_report(
 
 
 def _can_use_uniform_scale_solver(specs, constraints):
-    """Single length, no angle constraints → uniform scale about UV origin."""
+    """Single length, no angle constraints → uniform scale about quad centroid."""
     if len(specs) != 1:
         return False
     return not _has_angle_constraints(constraints)
 
 
+def _quad_centroid_xy(params0):
+    """Centroid of the four quad corners in XY."""
+    p = np.asarray(params0, dtype=float)
+    return np.array([
+        0.25 * (p[0] + p[2] + p[4] + p[6]),
+        0.25 * (p[1] + p[3] + p[5] + p[7]),
+    ], dtype=float)
+
+
+_UV_CORNER_UV = (
+    (0.0, 0.0),
+    (1.0, 0.0),
+    (1.0, 1.0),
+    (0.0, 1.0),
+)
+
+
 def _uniform_scale_params(params0, scale):
-    """Scale all quad corners about c0 (UV origin); c0 stays fixed."""
-    params = np.asarray(params0, dtype=float).copy()
-    c0x, c0y = params[0], params[1]
+    """Scale all quad corners about centroid; centroid stays fixed."""
+    params = np.asarray(params0, dtype=float)
+    g = _quad_centroid_xy(params)
+    s = float(scale)
+    out = []
     for i in range(0, len(params), 2):
-        params[i] = c0x + scale * (params0[i] - c0x)
-        params[i + 1] = c0y + scale * (params0[i + 1] - c0y)
-    return params
+        out.append(g[0] + s * (params0[i] - g[0]))
+        out.append(g[1] + s * (params0[i + 1] - g[1]))
+    return np.array(out, dtype=float)
 
 
-def _solve_uniform_scale_calibration(specs, params0, z_vals):
-    """Analytic uniform scale from one target length (similarity about c0)."""
-    corners0 = hg._corners_from_xy_params(params0, z_vals)
-    H0 = hg._homography_from_corners(*corners0)
-    spec = specs[0]
-    current = hg._line_length_uv(
-        spec["u0"], spec["v0"], spec["u1"], spec["v1"], H0)
-    if current < 1e-12:
-        raise ValueError("Degenerate line for uniform scale")
-    scale = float(spec["target"]) / current
-    params = _uniform_scale_params(params0, scale)
+def _max_length_error_mm(specs, H):
+    res = _length_residuals_for_specs(specs, H)
+    return max((abs(r) for r in res), default=0.0)
+
+
+def _scale_phase_converged(specs, params, params0, z_vals):
+    """True when length targets are met and corner angles are unchanged."""
+    H = hg._homography_from_xy_params(params, z_vals)
+    if _max_length_error_mm(specs, H) >= _CALIB_LENGTH_TOLERANCE_MM:
+        return False
+    return _angle_preserving_energy(params, params0, z_vals) < 1e-6
+
+
+def _uniform_scale_length_residuals(scale, specs, params_in, z_vals):
+    params = _uniform_scale_params(params_in, scale[0])
+    H = hg._homography_from_xy_params(params, z_vals)
+    res = np.asarray(_length_residuals_for_specs(specs, H), dtype=float)
+    return res / _CALIB_LENGTH_TOLERANCE_MM
+
+
+def _apply_uniform_scale_phase(specs, params_in, z_vals):
+    """Phase 1: uniform scale (analytic for one length, else least_squares on s)."""
+    params_in = np.asarray(params_in, dtype=float)
+    if len(specs) == 1:
+        corners = hg._corners_from_xy_params(params_in, z_vals)
+        H0 = hg._homography_from_corners(*corners)
+        spec = specs[0]
+        current = hg._line_length_uv(
+            spec["u0"], spec["v0"], spec["u1"], spec["v1"], H0)
+        if current < 1e-12:
+            raise ValueError("Degenerate line for uniform scale")
+        scale = float(spec["target"]) / current
+        params = _uniform_scale_params(params_in, scale)
+        info = {
+            "scale_factor": scale,
+            "analytic": True,
+            "nfev": 0,
+            "success": True,
+            "cost": 0.0,
+        }
+        return params, info
+
+    result = least_squares(
+        lambda s: _uniform_scale_length_residuals(s, specs, params_in, z_vals),
+        np.array([1.0], dtype=float),
+        ftol=_CALIB_SOLVER_FTOL,
+        xtol=_CALIB_SOLVER_XTOL,
+        gtol=_CALIB_SOLVER_GTOL,
+        max_nfev=_CALIB_SOLVER_MAX_NFEV)
+    scale = float(result.x[0])
+    params = _uniform_scale_params(params_in, scale)
+    info = {
+        "scale_factor": scale,
+        "analytic": False,
+        "nfev": int(result.nfev),
+        "success": bool(result.success),
+        "cost": float(result.cost),
+    }
+    return params, info
+
+
+def _make_uniform_scale_result(
+        params, params0, z_vals, specs, scale_info,
+        constraints=None, line_by_geo=None):
     corners = hg._corners_from_xy_params(params, z_vals)
     H = hg._homography_from_corners(*corners)
     length_res = _length_residuals_for_specs(specs, H)
-    max_len_err = max((abs(r) for r in length_res), default=0.0)
-    E_dist = _distortion_energy(params, params0, z_vals)
+    max_len_err = _max_length_error_mm(specs, H)
     rigid = _rigid_motion_stats(params, params0, z_vals)
     move = _corner_movement_stats(params, params0)
+    angle_meta = _angle_energy_report(params, params0, z_vals)
+    rank, n_primary, include_trans = _primary_constraint_rank(
+        params0, specs, z_vals,
+        constraints=constraints, line_by_geo=line_by_geo)
+    n_angles = _count_angle_constraints(constraints, line_by_geo)
     opt_info = {
-        "cost": 0.0,
-        "success": True,
+        "cost": scale_info.get("cost", 0.0),
+        "success": scale_info.get("success", True),
         "residuals": length_res,
-        "distortion_energy": E_dist,
         "rigid_motion": rigid,
         "corner_move": move,
-        "scale_factor": scale,
+        "scale_factor": scale_info["scale_factor"],
+        "stop_phase": "uniform_scale",
+        "nfev": scale_info.get("nfev", 0),
+        **angle_meta,
     }
     meta = {
         "mode": "uniform_scale",
+        "stop_phase": "uniform_scale",
         "exact": max_len_err < _CALIB_LENGTH_TOLERANCE_MM,
-        "distortion_energy": E_dist,
         "rigid_motion": rigid,
         "corners": corners,
         "corner_move": move,
-        "scale_factor": scale,
+        "scale_factor": scale_info["scale_factor"],
+        **angle_meta,
+        **_solver_diagnostics_meta(
+            rank, n_primary, include_trans, "uniform_scale",
+            n_lengths=len(specs), n_angles=n_angles),
     }
     return corners, H, opt_info, meta
+
+
+def _make_uv_scale_result(
+        params, params0, z_vals, specs, uniform_info, uv_info,
+        constraints=None, line_by_geo=None):
+    corners = hg._corners_from_xy_params(params, z_vals)
+    H = hg._homography_from_corners(*corners)
+    length_res = _length_residuals_for_specs(specs, H)
+    max_len_err = _max_length_error_mm(specs, H)
+    rigid = _rigid_motion_stats(params, params0, z_vals)
+    move = _corner_movement_stats(params, params0)
+    angle_meta = _angle_energy_report(params, params0, z_vals)
+    rank, n_primary, include_trans = _primary_constraint_rank(
+        params0, specs, z_vals,
+        constraints=constraints, line_by_geo=line_by_geo)
+    n_angles = _count_angle_constraints(constraints, line_by_geo)
+    opt_info = {
+        "cost": uv_info.get("cost", 0.0),
+        "success": uv_info.get("success", True),
+        "residuals": length_res,
+        "rigid_motion": rigid,
+        "corner_move": move,
+        "stop_phase": "uv_scale",
+        "scale_sx": uv_info["scale_sx"],
+        "scale_sy": uv_info["scale_sy"],
+        "uv_scale_nfev": uv_info.get("nfev", 0),
+        "nfev": uv_info.get("nfev", 0),
+        **angle_meta,
+    }
+    if uniform_info is not None:
+        opt_info["uniform_scale_factor"] = uniform_info.get("scale_factor")
+    meta = {
+        "mode": "uv_scale",
+        "stop_phase": "uv_scale",
+        "exact": max_len_err < _CALIB_LENGTH_TOLERANCE_MM,
+        "rigid_motion": rigid,
+        "corners": corners,
+        "corner_move": move,
+        "scale_sx": uv_info["scale_sx"],
+        "scale_sy": uv_info["scale_sy"],
+        "uv_scale_success": uv_info.get("success"),
+        "uv_scale_nfev": uv_info.get("nfev", 0),
+        **angle_meta,
+        **_solver_diagnostics_meta(
+            rank, n_primary, include_trans, "uv_scale",
+            n_lengths=len(specs), n_angles=n_angles),
+    }
+    if uniform_info is not None:
+        meta["uniform_scale_factor"] = uniform_info.get("scale_factor")
+    return corners, H, opt_info, meta
+
+
+def _solve_uniform_scale_calibration(specs, params0, z_vals):
+    """Analytic uniform scale from one target length (similarity about centroid)."""
+    params, scale_info = _apply_uniform_scale_phase(specs, params0, z_vals)
+    return _make_uniform_scale_result(
+        params, params0, z_vals, specs, scale_info)
+
+
+def _can_use_uv_scale_warm_start(specs, constraints):
+    """Two length targets, no angle constraints → sx/sy warm start."""
+    if len(specs) != 2:
+        return False
+    return not _has_angle_constraints(constraints)
+
+
+def _uv_scale_params(params0, sx, sy):
+    """Scale U/V about quad centroid (u,v pivot 0.5); preserves angles and centroid."""
+    p = np.asarray(params0, dtype=float)
+    c0 = p[0:2]
+    e_u = p[2:4] - c0
+    e_v = p[6:8] - c0
+    g = _quad_centroid_xy(p)
+    sx_f, sy_f = float(sx), float(sy)
+    out = []
+    for u, v in _UV_CORNER_UV:
+        corner = g + sx_f * (u - 0.5) * e_u + sy_f * (v - 0.5) * e_v
+        out.extend(corner)
+    return np.array(out, dtype=float)
+
+
+def _uv_scale_length_residuals(scales, specs, params0, z_vals):
+    params = _uv_scale_params(params0, scales[0], scales[1])
+    H = hg._homography_from_xy_params(params, z_vals)
+    res = np.asarray(_length_residuals_for_specs(specs, H), dtype=float)
+    return res / _CALIB_LENGTH_TOLERANCE_MM
+
+
+def _apply_uv_scale_phase(specs, params_in, z_vals):
+    """Phase 2: independent U/V scale (2 DOF) about current quad pose."""
+    result = least_squares(
+        lambda scales: _uv_scale_length_residuals(
+            scales, specs, params_in, z_vals),
+        np.array([1.0, 1.0], dtype=float),
+        ftol=_CALIB_SOLVER_FTOL,
+        xtol=_CALIB_SOLVER_XTOL,
+        gtol=_CALIB_SOLVER_GTOL,
+        max_nfev=_CALIB_SOLVER_MAX_NFEV)
+    sx, sy = float(result.x[0]), float(result.x[1])
+    params = _uv_scale_params(params_in, sx, sy)
+    info = {
+        "scale_sx": sx,
+        "scale_sy": sy,
+        "success": bool(result.success),
+        "nfev": int(result.nfev),
+        "cost": float(result.cost),
+    }
+    return params, info
+
+
+def _solve_uv_scale_phase(specs, params0, z_vals):
+    """Backward-compatible alias for phase-2 UV scale."""
+    params, info = _apply_uv_scale_phase(specs, params0, z_vals)
+    return params, info["scale_sx"], info["scale_sy"], info
 
 
 def _solve_corner_calibration(
@@ -461,16 +1021,45 @@ def _solve_corner_calibration(
     if least_squares is None:
         raise RuntimeError("scipy is required for corner calibration")
 
-    if _can_use_uniform_scale_solver(specs, constraints):
-        return _solve_uniform_scale_calibration(specs, params0, z_vals)
+    params_curr = np.asarray(params0, dtype=float).copy()
+    allow_scale_exit = not _has_angle_constraints(constraints)
+    uniform_info = None
+    uv_info = None
+
+    # Phase 1 — uniform (1D) scale (always)
+    params_curr, uniform_info = _apply_uniform_scale_phase(
+        specs, params_curr, z_vals)
+    if allow_scale_exit and _scale_phase_converged(
+            specs, params_curr, params0, z_vals):
+        return _make_uniform_scale_result(
+            params_curr, params0, z_vals, specs, uniform_info,
+            constraints=constraints, line_by_geo=line_by_geo)
+
+    # Phase 2 — independent U/V (2D) scale (always after phase 1)
+    params_curr, uv_info = _apply_uv_scale_phase(
+        specs, params_curr, z_vals)
+    if allow_scale_exit and _scale_phase_converged(
+            specs, params_curr, params0, z_vals):
+        return _make_uv_scale_result(
+            params_curr, params0, z_vals, specs,
+            uniform_info, uv_info,
+            constraints=constraints, line_by_geo=line_by_geo)
+
+    # Phase 3 — full corner optimization
+    params_start = params_curr
+    rank, n_primary, include_side = _primary_constraint_rank(
+        params0, specs, z_vals,
+        constraints=constraints, line_by_geo=line_by_geo, sketch=sketch)
+    n_angles = _count_angle_constraints(constraints, line_by_geo)
 
     residual_fn = lambda params: _calibration_residuals(
         params, specs, params0, z_vals,
-        constraints=constraints, line_by_geo=line_by_geo, sketch=sketch)
+        constraints=constraints, line_by_geo=line_by_geo, sketch=sketch,
+        include_side_terms=include_side)
 
     result = least_squares(
         residual_fn,
-        params0.copy(),
+        params_start,
         ftol=_CALIB_SOLVER_FTOL,
         xtol=_CALIB_SOLVER_XTOL,
         gtol=_CALIB_SOLVER_GTOL,
@@ -480,7 +1069,8 @@ def _solve_corner_calibration(
     corners = hg._corners_from_xy_params(params, z_vals)
     H = hg._homography_from_corners(*corners)
     length_res = _length_residuals_for_specs(specs, H)
-    max_len_err = max((abs(r) for r in length_res), default=0.0)
+    max_len_err = _max_length_error_mm(specs, H)
+    refined = False
 
     if max_len_err >= _CALIB_LENGTH_TOLERANCE_MM:
         refine = least_squares(
@@ -492,30 +1082,55 @@ def _solve_corner_calibration(
             max_nfev=_CALIB_SOLVER_REFINE_MAX_NFEV)
         params = refine.x
         result = refine
+        refined = True
         corners = hg._corners_from_xy_params(params, z_vals)
         H = hg._homography_from_corners(*corners)
         length_res = _length_residuals_for_specs(specs, H)
-        max_len_err = max((abs(r) for r in length_res), default=0.0)
+        max_len_err = _max_length_error_mm(specs, H)
 
-    E_dist = _distortion_energy(params, params0, z_vals)
     rigid = _rigid_motion_stats(params, params0, z_vals)
     move = _corner_movement_stats(params, params0)
+    angle_meta = _angle_energy_report(params, params0, z_vals)
     opt_info = {
         "cost": result.cost,
         "success": result.success,
         "residuals": length_res,
-        "distortion_energy": E_dist,
         "rigid_motion": rigid,
         "corner_move": move,
+        "nfev": int(result.nfev),
+        "status": int(result.status),
+        "message": str(result.message),
+        "refined": refined,
+        "stop_phase": "corners",
+        **angle_meta,
     }
+    if uniform_info is not None:
+        opt_info["uniform_scale_factor"] = uniform_info.get("scale_factor")
+    if uv_info is not None:
+        opt_info["uv_scale_warm_start"] = True
+        opt_info["scale_sx"] = uv_info["scale_sx"]
+        opt_info["scale_sy"] = uv_info["scale_sy"]
+        opt_info["uv_scale_nfev"] = uv_info["nfev"]
     meta = {
         "mode": "corners",
+        "stop_phase": "corners",
         "exact": max_len_err < _CALIB_LENGTH_TOLERANCE_MM,
-        "distortion_energy": E_dist,
         "rigid_motion": rigid,
         "corners": corners,
         "corner_move": move,
+        **angle_meta,
+        **_solver_diagnostics_meta(
+            rank, n_primary, include_side, "corners",
+            n_lengths=len(specs), n_angles=n_angles),
     }
+    if uniform_info is not None:
+        meta["uniform_scale_factor"] = uniform_info.get("scale_factor")
+    if uv_info is not None:
+        meta["uv_scale_warm_start"] = True
+        meta["scale_sx"] = uv_info["scale_sx"]
+        meta["scale_sy"] = uv_info["scale_sy"]
+        meta["uv_scale_success"] = uv_info["success"]
+        meta["uv_scale_nfev"] = uv_info["nfev"]
     return corners, H, opt_info, meta
 def _corner_movement_stats(params, params0):
     deltas = params - params0
@@ -588,38 +1203,19 @@ def _print_scale_solver_debug(lines, H, specs, phase, opt_info=None, meta=None):
     App.Console.PrintMessage(
         "\n[Scale Solver Debug] {} ({} Linie(n))\n".format(phase, len(lines)))
     if not after and meta is not None:
-        mode = meta.get("mode", "homography")
-        mode_labels = {
-            "corners": (
-                "Eckpunkt-Optimierung — Längen, Verzerrungsenergie, "
-                "min. Translation (einheitliches least_squares)"),
-            "uniform_scale": (
-                "Einheitliche Skalierung um Bildeckpunkt (eine Soll-Länge)"),
-        }
-        App.Console.PrintMessage(
-            "  Modus: {}\n".format(mode_labels.get(mode, mode)))
-        if mode == "corners":
+        _print_solver_diagnostics(meta=meta, opt_info=opt_info)
+        welds = meta.get("endpoint_welds", 0)
+        if welds:
             App.Console.PrintMessage(
-                "  Verzerrungsenergie E={:.6e} (0 = reine Skalierung)\n".format(
-                    meta.get("distortion_energy", 0.0)))
-            rigid = meta.get("rigid_motion", {})
-            App.Console.PrintMessage(
-                "  Starre Bewegung: Δ={:.4f} mm, θ={:.4f}°\n".format(
-                    rigid.get("translation_mm", 0.0),
-                    rigid.get("rotation_deg", 0.0)))
-            move = meta.get("corner_move", {})
-            App.Console.PrintMessage(
-                "  Längen exakt (< {:.3f} mm): {}\n".format(
-                    _CALIB_LENGTH_TOLERANCE_MM, meta.get("exact", False)))
-            welds = meta.get("endpoint_welds", 0)
-            if welds:
+                "  Endpunkt-Knoten: {} zusammengeführt (≤ {:.1f} mm)\n".format(
+                    welds, REF_LINE_ENDPOINT_SNAP_MM))
+        if opt_info is not None:
+            res = opt_info.get("residuals")
+            if res is not None:
                 App.Console.PrintMessage(
-                    "  Endpunkt-Knoten: {} zusammengeführt (≤ {:.1f} mm)\n".format(
-                        welds, REF_LINE_ENDPOINT_SNAP_MM))
-            App.Console.PrintMessage(
-                "  Eck-Verschiebung: max={:.4f} mm, rms={:.4f} mm\n".format(
-                    move.get("max_mm", 0.0), move.get("rms_mm", 0.0)))
-        elif "C" in meta:
+                    "  Restfehler Längen [mm]: {}\n".format(
+                        ", ".join("{:.4f}".format(r) for r in res)))
+        if "C" in meta:
             C = meta["C"]
             App.Console.PrintMessage(
                 "  C = [[{:.4f}, {:.4f}, {:.4f}], [{:.4f}, {:.4f}, {:.4f}], "
@@ -627,15 +1223,6 @@ def _print_scale_solver_debug(lines, H, specs, phase, opt_info=None, meta=None):
                     C[0, 0], C[0, 1], C[0, 2],
                     C[1, 0], C[1, 1], C[1, 2],
                     C[2, 0], C[2, 1]))
-        if opt_info is not None:
-            App.Console.PrintMessage(
-                "  Optimierung: cost={:.6e}, success={}\n".format(
-                    opt_info.get("cost", 0.0), opt_info.get("success", True)))
-            res = opt_info.get("residuals")
-            if res is not None:
-                App.Console.PrintMessage(
-                    "  Restfehler Solver: {}\n".format(
-                        ", ".join("{:.4f}".format(r) for r in res)))
     if after:
         App.Console.PrintMessage(
             "  {:<22} {:>11} {:>11} {:>11}\n".format(

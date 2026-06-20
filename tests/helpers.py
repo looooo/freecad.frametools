@@ -1,6 +1,8 @@
 """Synthetic geometry for calibration solver tests."""
 
+import json
 import math
+import os
 
 import FreeCAD as App
 import numpy as np
@@ -100,6 +102,22 @@ def dot_directions(H, line_a, line_b):
     return float(np.dot(da, db))
 
 
+def angle_between_lines_deg(H, line_a, line_b):
+    """Interior angle between two line directions in world XY (degrees)."""
+    cos_a = float(np.clip(dot_directions(H, line_a, line_b), -1.0, 1.0))
+    return float(np.degrees(np.arccos(cos_a)))
+
+
+def angle_energy_report(corners0, H):
+    """Per-corner angle preservation metrics after a solve."""
+    from freecad.frametools import image_constraint_solver as ics
+
+    params0 = image_tools._pack_corners_xy(corners0)
+    params = image_tools._pack_corners_xy(corners_from_homography(H))
+    z_vals = image_tools._corner_z_values(corners0)
+    return ics._angle_energy_report(params, params0, z_vals)
+
+
 def axis_sin(H, line, axis, sketch=None):
     """axis: 'u' (horizontal / sketch-X) or 'v' (vertical / sketch-Y)."""
     if axis == "horizontal":
@@ -143,13 +161,29 @@ def solve_corners(corners, specs, constraints=None, line_meta=None, sketch=None)
         sketch=sketch)
     residuals = opt_info.get("residuals") or []
     max_len_err = max((abs(r) for r in residuals), default=0.0)
+    angle_meta = angle_energy_report(corners, H)
     report = {
         "length_error": max_len_err,
         "success": opt_info.get("success"),
         "exact": meta.get("exact"),
         "distortion_energy": meta.get("distortion_energy", 0.0),
+        "angle_preserving_energy": angle_meta.get("angle_preserving_energy"),
+        "corner_angle_energies": angle_meta.get("corner_angle_energies"),
+        "corner_angles_deg": angle_meta.get("corner_angles_deg"),
+        "corner_angles_deg0": angle_meta.get("corner_angles_deg0"),
         "mode": meta.get("mode"),
         "scale_factor": opt_info.get("scale_factor"),
+        "constraint_rank": meta.get("constraint_rank"),
+        "primary_constraint_count": meta.get("primary_constraint_count"),
+        "effective_dof": meta.get("effective_dof"),
+        "include_side_terms": meta.get("include_side_terms"),
+        "include_distortion_energy": meta.get("include_distortion_energy"),
+        "determinacy": meta.get("determinacy"),
+        "uv_scale_warm_start": meta.get("uv_scale_warm_start"),
+        "scale_sx": meta.get("scale_sx"),
+        "scale_sy": meta.get("scale_sy"),
+        "stop_phase": meta.get("stop_phase"),
+        "uniform_scale_factor": meta.get("uniform_scale_factor"),
     }
     return H, report
 
@@ -196,3 +230,45 @@ def targets_from_reference(corners_ref, *lines):
     """Build length specs from a reference rectangle / corner pose."""
     H = homography_from_corners(corners_ref)
     return [length_spec(line, length_mm(H, line)) for line in lines]
+
+
+_FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
+
+
+def load_fixture(name):
+    """Load a JSON fixture from tests/fixtures/."""
+    path = os.path.join(_FIXTURES_DIR, name)
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def corners_from_fixture(data):
+    c = data["corners0"]
+    return (
+        vec(*c["c0"]),
+        vec(*c["cx"]),
+        vec(*c["c1"]),
+        vec(*c["cy"]),
+    )
+
+
+def length_specs_from_fixture(data):
+    line_by = line_by_geo(*data["lines"])
+    specs = []
+    for item in data["constraints"].get("lengths", []):
+        line = line_by[int(item["line"])]
+        specs.append(length_spec(line, float(item["target_mm"])))
+    return specs, line_by
+
+
+def single_length_fixture(data, line_index=0):
+    """One length constraint from a multi-length fixture (e.g. align_image_test_1)."""
+    line_by = line_by_geo(*data["lines"])
+    item = data["constraints"]["lengths"][line_index]
+    line = line_by[int(item["line"])]
+    spec = length_spec(line, float(item["target_mm"]))
+    constraints = image_calibration_objects.default_constraints()
+    constraints["lengths"] = [
+        {"line": int(item["line"]), "target_mm": float(item["target_mm"])},
+    ]
+    return spec, constraints, line_by

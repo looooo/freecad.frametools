@@ -51,6 +51,7 @@ _corner_z_values = hg._corner_z_values
 _sync_warp_from_corners = pa._sync_warp_from_corners
 _restore_aligned_corners = pa._restore_aligned_corners
 _solve_corner_calibration = cs._solve_corner_calibration
+_primary_constraint_rank = cs._primary_constraint_rank
 _remap_constraint_geos = cs._remap_constraint_geos
 _axis_alignment_sin = cs._axis_alignment_sin
 _constraints_need_geo_remap = cs._constraints_need_geo_remap

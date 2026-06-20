@@ -65,7 +65,7 @@ class TestTrapezoidToRectangle(unittest.TestCase):
 
 
 class TestSingleLengthScale(unittest.TestCase):
-    """One length constraint → uniform scaling about the image origin."""
+    """One length constraint → uniform scaling about the quad centroid."""
 
     def test_uniform_scale_from_bottom_edge(self):
         corners = h.corners_rectangle(100.0, 100.0)
@@ -95,6 +95,7 @@ class TestSingleLengthScale(unittest.TestCase):
             h.length_mm(H, right), 100.0 * scale, delta=h.LENGTH_TOL_MM)
         self.assertLess(report["distortion_energy"], h.DISTORTION_TOL)
         self.assertEqual(report["mode"], "uniform_scale")
+        self.assertEqual(report["determinacy"], "unterbestimmt")
         self.assertAlmostEqual(report["scale_factor"], scale, places=4)
         c0, cx, c1, cy = h.corners_from_homography(H)
         self.assertAlmostEqual(c0.distanceToPoint(cx), target, delta=h.LENGTH_TOL_MM)
@@ -121,8 +122,234 @@ class TestSingleLengthScale(unittest.TestCase):
         self.assertLess(report["distortion_energy"], h.DISTORTION_TOL)
 
 
+class TestCentroidScalePivot(unittest.TestCase):
+    """uniform_scale / uv_scale pivot at quad centroid, not c0."""
+
+    @staticmethod
+    def _centroid_xy(corners):
+        return np.mean([[c.x, c.y] for c in corners], axis=0)
+
+    def test_uniform_scale_preserves_centroid(self):
+        from freecad.frametools import image_constraint_solver as cs
+        from freecad.frametools import image_homography as hg
+
+        corners = h.corners_rectangle(100.0, 80.0, origin=(50.0, 30.0, 0.0))
+        params0 = image_tools._pack_corners_xy(corners)
+        z_vals = image_tools._corner_z_values(corners)
+        g0 = self._centroid_xy(corners)
+
+        params = cs._uniform_scale_params(params0, 1.5)
+        g1 = self._centroid_xy(hg._corners_from_xy_params(params, z_vals))
+        np.testing.assert_allclose(g1, g0, atol=1e-9)
+
+    def test_uv_scale_preserves_centroid(self):
+        from freecad.frametools import image_constraint_solver as cs
+        from freecad.frametools import image_homography as hg
+
+        corners = h.corners_trapezoid(220.0, 170.0, 110.0, shear_top=30.0)
+        params0 = image_tools._pack_corners_xy(corners)
+        z_vals = image_tools._corner_z_values(corners)
+        g0 = self._centroid_xy(corners)
+
+        params = cs._uv_scale_params(params0, 1.264, 1.138)
+        g1 = self._centroid_xy(hg._corners_from_xy_params(params, z_vals))
+        np.testing.assert_allclose(g1, g0, atol=1e-9)
+
+
+class TestRealisticCalibration(unittest.TestCase):
+    """Sketch-like lines on a distorted quad (not U/V edge segments)."""
+
+    def setUp(self):
+        self.start = h.corners_trapezoid(220.0, 170.0, 110.0, shear_top=30.0)
+        self.H0 = h.homography_from_corners(self.start)
+        # Interior lines in UV — roughly 46° apart in world XY, not u=0 / v=0.
+        self.line_a = h.line_uv(0, 0.05, 0.15, 0.95, 0.35)
+        self.line_b = h.line_uv(1, 0.15, 0.05, 0.45, 0.95)
+        self.line_meta = h.line_by_geo(self.line_a, self.line_b)
+        angle = h.angle_between_lines_deg(
+            self.H0, self.line_a, self.line_b)
+        self.assertGreater(angle, 35.0)
+        self.assertLess(angle, 60.0)
+
+    def test_one_length_on_interior_diagonal(self):
+        """One known length on an oblique interior segment (not a U/V edge)."""
+        line = h.line_uv(0, 0.15, 0.05, 0.85, 0.92)
+        scale = 1.35
+        target = h.length_mm(self.H0, line) * scale
+        specs = [h.length_spec(line, target)]
+        H, report = h.solve_corners(
+            self.start, specs, line_meta=h.line_by_geo(line))
+        self.assertEqual(report["mode"], "uniform_scale")
+        self.assertTrue(report["success"])
+        self.assertAlmostEqual(
+            h.length_mm(H, line), target, delta=h.LENGTH_TOL_MM)
+        self.assertLess(report["angle_preserving_energy"], h.DISTORTION_TOL)
+        self.assertAlmostEqual(report["scale_factor"], scale, places=3)
+
+    def test_two_oblique_lengths_consistent_rectangle_targets(self):
+        """Two non-orthogonal lines with targets from an axis-aligned reference."""
+        ref = h.corners_rectangle(200.0, 100.0)
+        specs = h.targets_from_reference(ref, self.line_a, self.line_b)
+        H, report = h.solve_corners(
+            self.start, specs, line_meta=self.line_meta)
+        for spec in specs:
+            err = abs(h.length_mm(H, spec) - spec["target"])
+            self.assertLess(err, h.LENGTH_TOL_MM, msg=spec["label"])
+        self.assertTrue(report["success"])
+        self.assertLess(report["constraint_rank"], 6)
+        self.assertTrue(report["include_distortion_energy"])
+        self.assertLess(report["angle_preserving_energy"], h.DISTORTION_TOL)
+
+    def test_two_oblique_lengths_incompatible_targets_shears(self):
+        """Incompatible sx/sy targets may still need shear in phase 2."""
+        specs = [
+            h.length_spec(
+                self.line_a, h.length_mm(self.H0, self.line_a) * 1.5),
+            h.length_spec(
+                self.line_b, h.length_mm(self.H0, self.line_b) * 0.7),
+        ]
+        H, report = h.solve_corners(
+            self.start, specs, line_meta=self.line_meta)
+        for spec in specs:
+            err = abs(h.length_mm(H, spec) - spec["target"])
+            self.assertLess(err, h.LENGTH_TOL_MM, msg=spec["label"])
+        self.assertIn(report["mode"], ("uv_scale", "corners"))
+        if report["mode"] == "corners":
+            self.assertTrue(report.get("uv_scale_warm_start"))
+        # Phase 2 keeps angles when it exits; phase 3 may distort.
+        if report["angle_preserving_energy"] > 1e-3:
+            a0 = report["corner_angles_deg0"][0]
+            a1 = report["corner_angles_deg"][0]
+            self.assertGreater(abs(a1 - a0), 1.0)
+
+
+class TestAlignImageTest1Fixture(unittest.TestCase):
+    """Regression from example/align_image_test_1.FCStd (tests/fixtures/)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fixture = h.load_fixture("align_image_test_1.json")
+        cls.corners0 = h.corners_from_fixture(cls.fixture)
+        cls.specs, cls.line_by_geo = h.length_specs_from_fixture(cls.fixture)
+        cls.constraints = cls.fixture["constraints"]
+        cls.expected = cls.fixture["solver_at_extract"]
+        cls.line0 = cls.line_by_geo[0]
+        cls.line1 = cls.line_by_geo[1]
+
+    def test_fixture_lines_are_interior_sketch_segments(self):
+        """L0/L1 are not the U/V boundary edges of the unit square."""
+        self.assertAlmostEqual(self.line0["u0"], self.line0["u1"], places=3)
+        self.assertGreater(min(self.line0["v0"], self.line0["v1"]), 0.05)
+        self.assertAlmostEqual(self.line1["v0"], self.line1["v1"], places=3)
+        self.assertGreater(min(self.line1["u0"], self.line1["u1"]), 0.05)
+
+    def test_two_lengths_match_targets(self):
+        H, report = h.solve_corners(
+            self.corners0, self.specs,
+            constraints=self.constraints,
+            line_meta=self.line_by_geo)
+        for spec in self.specs:
+            err = abs(h.length_mm(H, spec) - spec["target"])
+            self.assertLess(err, h.LENGTH_TOL_MM, msg=spec["label"])
+        self.assertLess(report["length_error"], h.LENGTH_TOL_MM)
+        self.assertTrue(report["exact"])
+
+    def test_one_length_L0_uniform_scale(self):
+        """Single length 400 mm on L0 → analytic uniform scale (photo fixture)."""
+        spec, constraints, line_by = h.single_length_fixture(self.fixture, 0)
+        H0 = h.homography_from_corners(self.corners0)
+        current = h.length_mm(H0, spec)
+        expected_scale = spec["target"] / current
+
+        H, report = h.solve_corners(
+            self.corners0, [spec],
+            constraints=constraints,
+            line_meta=line_by)
+        self.assertEqual(report["mode"], "uniform_scale")
+        self.assertTrue(report["success"])
+        self.assertAlmostEqual(
+            h.length_mm(H, spec), spec["target"], delta=h.LENGTH_TOL_MM)
+        self.assertAlmostEqual(
+            report["scale_factor"], expected_scale, places=4)
+        self.assertLess(report["angle_preserving_energy"], h.DISTORTION_TOL)
+        self.assertFalse(report.get("uv_scale_warm_start"))
+
+    def test_one_length_compute_calibration_from_specs(self):
+        """One length via AlignedImage API on align_image_test_1 geometry."""
+        spec, constraints, line_by = h.single_length_fixture(self.fixture, 0)
+        doc = h.new_document("AlignImageTest1OneLen")
+        try:
+            img = h.make_aligned_image(doc, self.corners0)
+            corners_new, H, opt_info, meta = (
+                image_tools.compute_calibration_from_specs(
+                    [spec], img,
+                    constraints=constraints,
+                    line_by_geo=line_by))
+            self.assertEqual(meta.get("mode"), "uniform_scale")
+            self.assertTrue(opt_info.get("success"))
+            self.assertAlmostEqual(
+                h.length_mm(H, spec), spec["target"], delta=h.LENGTH_TOL_MM)
+            self.assertLess(
+                meta.get("angle_preserving_energy", 1.0), h.DISTORTION_TOL)
+            self.assertIsNotNone(corners_new)
+        finally:
+            h.close_document(doc)
+
+    def test_uv_scale_warm_start_preserves_angles(self):
+        """Two lengths on photo fixture: cascade stops at uv_scale when exact."""
+        H, report = h.solve_corners(
+            self.corners0, self.specs,
+            constraints=self.constraints,
+            line_meta=self.line_by_geo)
+        for spec in self.specs:
+            err = abs(h.length_mm(H, spec) - spec["target"])
+            self.assertLess(err, h.LENGTH_TOL_MM, msg=spec["label"])
+        self.assertEqual(report["mode"], "uv_scale")
+        self.assertEqual(report.get("stop_phase"), "uv_scale")
+        self.assertIsNotNone(report.get("scale_sx"))
+        self.assertIsNotNone(report.get("scale_sy"))
+        self.assertIsNotNone(report.get("uniform_scale_factor"))
+        self.assertTrue(report["success"])
+        self.assertLess(report["angle_preserving_energy"], h.DISTORTION_TOL)
+        self.assertLess(report["constraint_rank"], 6)
+        self.assertTrue(report["include_distortion_energy"])
+
+    def test_underdetermined_corner_solve_regression(self):
+        """Former shear bug: UV scale or corners keeps E_angle ≈ 0."""
+        H, report = h.solve_corners(
+            self.corners0, self.specs,
+            constraints=self.constraints,
+            line_meta=self.line_by_geo)
+        self.assertIn(report["mode"], ("uv_scale", "corners"))
+        self.assertTrue(report["success"])
+        self.assertLess(report["angle_preserving_energy"], h.DISTORTION_TOL)
+
+    def test_compute_calibration_from_specs(self):
+        """Same scenario through AlignedImage API."""
+        doc = h.new_document("AlignImageTest1")
+        try:
+            img = h.make_aligned_image(doc, self.corners0)
+            corners_new, H, opt_info, meta = (
+                image_tools.compute_calibration_from_specs(
+                    self.specs, img,
+                    constraints=self.constraints,
+                    line_by_geo=self.line_by_geo))
+            for spec in self.specs:
+                err = abs(h.length_mm(H, spec) - spec["target"])
+                self.assertLess(err, h.LENGTH_TOL_MM)
+            self.assertTrue(opt_info.get("success"))
+            self.assertLess(
+                meta.get("angle_preserving_energy", 1.0), h.DISTORTION_TOL)
+            self.assertIn(meta.get("mode"), ("uv_scale", "corners"))
+            if meta.get("mode") == "corners":
+                self.assertTrue(meta.get("uv_scale_warm_start"))
+            self.assertIsNotNone(corners_new)
+        finally:
+            h.close_document(doc)
+
+
 class TestTwoLengthScale(unittest.TestCase):
-    """Two length constraints on perpendicular edges → anisotropic 2D scale."""
+    """Two length constraints on U/V edges → 2D scale without shear."""
 
     def test_two_lengths_set_width_and_height(self):
         corners = h.corners_rectangle(100.0, 100.0)
@@ -137,7 +364,7 @@ class TestTwoLengthScale(unittest.TestCase):
         self.assertAlmostEqual(h.length_mm(H, bottom), 150.0, delta=h.LENGTH_TOL_MM)
         self.assertAlmostEqual(h.length_mm(H, left), 80.0, delta=h.LENGTH_TOL_MM)
         self.assertLess(report["length_error"], h.LENGTH_TOL_MM)
-        self.assertGreater(report["distortion_energy"], h.DISTORTION_TOL)
+        self.assertLess(report["distortion_energy"], h.DISTORTION_TOL)
 
     def test_two_lengths_from_skewed_start(self):
         """Trapezoid + bottom/left targets → both lengths met."""
@@ -408,6 +635,67 @@ class TestConstraintRemapping(unittest.TestCase):
         self.assertEqual(remapped["parallel"][0]["line_b"], 2)
         self.assertEqual(remapped["perpendicular"][0]["line_a"], 4)
         self.assertEqual(remapped["perpendicular"][0]["line_b"], 1)
+
+
+class TestDistortionEnergyGating(unittest.TestCase):
+    """E_angle always in residuals; centroid translation only if rank < 6."""
+
+    def test_two_lengths_underdetermined_includes_e(self):
+        corners = h.corners_rectangle(100.0, 100.0)
+        bottom = h.line_uv(0, 0.0, 0.0, 1.0, 0.0)
+        left = h.line_uv(1, 0.0, 0.0, 0.0, 1.0)
+        specs = [h.length_spec(bottom, 150.0), h.length_spec(left, 80.0)]
+        H, report = h.solve_corners(
+            corners, specs, line_meta=h.line_by_geo(bottom, left))
+        self.assertIsNotNone(H)
+        self.assertLess(report["constraint_rank"], 6)
+        self.assertTrue(report["include_distortion_energy"])
+        self.assertEqual(report["determinacy"], "unterbestimmt")
+
+    def test_one_length_and_horizontal_underdetermined(self):
+        skew = h.corners_trapezoid(200.0, 170.0, 100.0, shear_top=25.0)
+        bottom = h.line_uv(0, 0.05, 0.02, 0.95, 0.15)
+        H0 = h.homography_from_corners(skew)
+        constraints = h.empty_constraints()
+        constraints["horizontal"] = [{"geo": 0}]
+        specs = [h.length_spec(bottom, h.length_mm(H0, bottom))]
+        H, report = h.solve_corners(
+            skew, specs,
+            constraints=constraints,
+            line_meta=h.line_by_geo(bottom))
+        self.assertIsNotNone(H)
+        self.assertLess(report["constraint_rank"], 6)
+        self.assertTrue(report["include_distortion_energy"])
+        self.assertEqual(report["determinacy"], "unterbestimmt")
+
+    def test_many_length_constraints_may_exclude_translation(self):
+        """Eight length specs can reach full rank → only Δt omitted."""
+        from freecad.frametools import image_constraint_solver as cs
+
+        corners = h.corners_rectangle(120.0, 90.0)
+        H0 = h.homography_from_corners(corners)
+        lines = [
+            h.line_uv(0, 0.0, 0.0, 1.0, 0.0),
+            h.line_uv(1, 0.0, 0.0, 0.0, 1.0),
+            h.line_uv(2, 0.0, 0.0, 1.0, 1.0),
+            h.line_uv(3, 0.2, 0.0, 0.8, 1.0),
+            h.line_uv(4, 0.0, 0.2, 1.0, 0.8),
+            h.line_uv(5, 0.1, 0.1, 0.9, 0.5),
+            h.line_uv(6, 0.0, 0.5, 1.0, 0.5),
+            h.line_uv(7, 0.5, 0.0, 0.5, 1.0),
+        ]
+        specs = [h.length_spec(line, h.length_mm(H0, line)) for line in lines]
+        params0 = image_tools._pack_corners_xy(corners)
+        z_vals = image_tools._corner_z_values(corners)
+        rank, n_primary, include_trans = image_tools._primary_constraint_rank(
+            params0, specs, z_vals, line_by_geo=h.line_by_geo(*lines))
+        self.assertEqual(n_primary, 8)
+        self.assertTrue(
+            cs._angle_energy_side_residuals(params0, params0, z_vals).size)
+        if rank >= 6:
+            self.assertFalse(include_trans)
+        else:
+            self.assertTrue(include_trans)
 
 
 if __name__ == "__main__":

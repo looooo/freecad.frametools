@@ -1,0 +1,93 @@
+{
+  "source": "example/align_image_test_1.FCStd",
+  "description": "Two length constraints (400 mm, 1200.499 mm) on sketch lines L0/L1 of a photo ImagePlane; no angle constraints.",
+  "corners0": {
+    "c0": [
+      1263.7619047619046,
+      -541.7989417989419,
+      0.0
+    ],
+    "cx": [
+      1263.7619047619048,
+      541.7989417989417,
+      0.0
+    ],
+    "c1": [
+      654.2380952380954,
+      541.7989417989419,
+      0.0
+    ],
+    "cy": [
+      654.2380952380952,
+      -541.7989417989417,
+      0.0
+    ]
+  },
+  "lines": [
+    {
+      "geo": 0,
+      "label": "L0",
+      "u0": 0.09761923828124999,
+      "v0": 0.7673306517187501,
+      "u1": 0.0976192382812499,
+      "v1": 0.19065210937499988
+    },
+    {
+      "geo": 1,
+      "label": "L1",
+      "u0": 0.0976192382812499,
+      "v0": 0.19065210937499988,
+      "u1": 0.9741072735351564,
+      "v1": 0.19065210937499955
+    },
+    {
+      "geo": 2,
+      "label": "L2",
+      "u0": 0.9741072735351564,
+      "v0": 0.19065210937499955,
+      "u1": 0.9995497558593747,
+      "v1": 0.6838682812499992
+    },
+    {
+      "geo": 3,
+      "label": "L3",
+      "u0": 0.9995497558593747,
+      "v0": 0.6838682812499992,
+      "u1": 0.09761923828124999,
+      "v1": 0.7673306517187501
+    }
+  ],
+  "constraints": {
+    "lengths": [
+      {
+        "line": 0,
+        "target_mm": 400.0
+      },
+      {
+        "line": 1,
+        "target_mm": 1200.499
+      }
+    ],
+    "parallel": [],
+    "perpendicular": [],
+    "horizontal": [],
+    "vertical": []
+  },
+  "length_targets_mm": [
+    400.0,
+    1200.499
+  ],
+  "solver_at_extract": {
+    "success": false,
+    "exact": true,
+    "mode": "corners",
+    "constraint_rank": 2,
+    "include_distortion_energy": true,
+    "determinacy": "unterbestimmt",
+    "angle_preserving_energy": 0.9021716831167124,
+    "length_errors_mm": [
+      2.0280072931200266e-05,
+      0.0002512675159778155
+    ]
+  }
+}
