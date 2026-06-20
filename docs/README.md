@@ -14,3 +14,5 @@ Einzelthemen (Detail / Ist-Zustand):
 | [IMAGE_TOOLS.md](IMAGE_TOOLS.md) | Objekte, Befehle, Interaktion, Homographie, Kalibrierung (Anwendung) |
 | [CALIBRATION_SOLVER.md](CALIBRATION_SOLVER.md) | Mathematische Beschreibung des Kalibrierungs-Solvers |
 | [CAMERA_MODEL.md](CAMERA_MODEL.md) | Entwurf: Kameramodell (Gitter-Kalibrierung, B-Spline-Entzerrung, Coin) |
+| [IMAGE_PIPELINE_SPEC.md](IMAGE_PIPELINE_SPEC.md) | Konsolidierte Spezifikation Image-Workflow (Soll / Neuimplementierung) |
+| [MICROAPPS.md](MICROAPPS.md) | **Vorgemerkt:** Micro-Apps + User-Workbench (noch nicht umgesetzt) |

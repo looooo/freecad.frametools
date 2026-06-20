@@ -12,6 +12,9 @@ Vereinfachungen in einem File.
 1412 Zeilen Constraint-Solver). Die Spezifikation beschreibt das **Soll-Verhalten**
 und markiert, was man vereinfachen kann.
 
+**FreeCAD-Struktur (später, vorgemerkt):** [MICROAPPS.md](MICROAPPS.md) — Micro-Apps
+statt Monolith-Workbench; Frame-Workbench bleibt Dev/Test.
+
 ---
 
 ## Inhaltsverzeichnis
