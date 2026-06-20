@@ -5,6 +5,7 @@
 | [IMAGE_ALIGNMENT.md](IMAGE_ALIGNMENT.md) | Kurzüberblick Workflow und Toolbar-Befehle |
 | [IMAGE_TOOLS.md](IMAGE_TOOLS.md) | Objekte, Befehle, Interaktion, Homographie, Kalibrierung (Anwendung) |
 | [CALIBRATION_SOLVER.md](CALIBRATION_SOLVER.md) | Mathematische Beschreibung des Kalibrierungs-Solvers |
+| [CAMERA_MODEL.md](CAMERA_MODEL.md) | Entwurf: Kameramodell (Gitter-Kalibrierung, B-Spline-Entzerrung, Coin) |
 
 ## PDF (Kalibrierungs-Solver)
 

@@ -31,7 +31,9 @@ Implementierungs- und Nutzerbeschreibung für die Bild-Werkzeuge des Frame-Tools
 8. [Auswahl-Regeln](#auswahl-regeln)
 9. [Abhängigkeiten](#abhängigkeiten)
 
-Weitere Dokumente: [README.md](README.md), [CALIBRATION_SOLVER.md](CALIBRATION_SOLVER.md) (mathematische Solver-Beschreibung).
+Weitere Dokumente: [README.md](README.md), [CALIBRATION_SOLVER.md](CALIBRATION_SOLVER.md)
+(mathematische Solver-Beschreibung), [CAMERA_MODEL.md](CAMERA_MODEL.md) (Entwurf:
+Objektiv-Entzerrung aus Gitter-Foto, B-Spline, Coin-Darstellung).
 
 ---
 
@@ -317,6 +319,10 @@ y = (h₂₁·u + h₂₂·v + h₂₃) / (h₃₁·u + h₃₂·v + 1)
 **Ansatz:** Die vier XY-Positionen der Bildecken werden als Optimierungsvariablen bewegt (Z-Werte der Ecken bleiben fix). Daraus folgt eine Homographie `H`; Längen der Referenzlinien werden in UV-Raum berechnet (`_line_length_uv`).
 
 **Mathematik und Solver-Details:** [CALIBRATION_SOLVER.md](CALIBRATION_SOLVER.md) (Formeln, Residuen, `uniform_scale` vs. `corners`).
+
+**Geplant:** Vor der Homographie optionale **Objektiv-Entzerrung** aus einem
+gespeicherten Kameramodell (Gitter-Kalibrierung, B-Spline δ(u,v)) —
+siehe [CAMERA_MODEL.md](CAMERA_MODEL.md).
 
 ### Referenzlinien-Specs
 

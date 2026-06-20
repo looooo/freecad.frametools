@@ -6,6 +6,9 @@ Kurzüberblick für den Image-Workflow im Frame-Tools-Workbench.
 
 **Kalibrierungs-Solver (Formeln):** [CALIBRATION_SOLVER.md](CALIBRATION_SOLVER.md)
 
+**Kameramodell (Entwurf):** [CAMERA_MODEL.md](CAMERA_MODEL.md) — Gitter-Kalibrierung,
+B-Spline-Entzerrung, Anwendung beim Foto-Laden.
+
 ---
 
 ## Workflow

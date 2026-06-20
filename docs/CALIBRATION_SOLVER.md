@@ -9,7 +9,8 @@ Lösungspfade (`uniform_scale` und `corners`).
 
 **PDF:** `docs/pdf/build_calibration_solver.sh` → [pdf/CALIBRATION_SOLVER.pdf](pdf/CALIBRATION_SOLVER.pdf)
 
-Siehe auch [README.md](README.md) und [IMAGE_TOOLS.md](IMAGE_TOOLS.md) (Anwendung/UI).
+Siehe auch [README.md](README.md), [IMAGE_TOOLS.md](IMAGE_TOOLS.md) (Anwendung/UI) und
+[CAMERA_MODEL.md](CAMERA_MODEL.md) (geplante Objektiv-Entzerrung vor der Homographie).
 
 ---
 
