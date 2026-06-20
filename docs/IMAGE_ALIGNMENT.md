@@ -4,6 +4,8 @@ Kurzüberblick für den Image-Workflow im Frame-Tools-Workbench.
 
 **Vollständige Dokumentation:** [IMAGE_TOOLS.md](IMAGE_TOOLS.md) — Objekte, Befehle, Mathematik, Interaktion und Implementierungsdetails.
 
+**Kalibrierungs-Solver (Formeln):** [CALIBRATION_SOLVER.md](CALIBRATION_SOLVER.md)
+
 ---
 
 ## Workflow

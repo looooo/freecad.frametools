@@ -9,7 +9,10 @@ Implementierungs- und Nutzerbeschreibung für die Bild-Werkzeuge des Frame-Tools
 | Datei | Inhalt |
 |-------|--------|
 | `freecad/frametools/image_objects.py` | FreeCAD-Objekte und ViewProvider (Coin-Darstellung) |
-| `freecad/frametools/image_tools.py` | Mathematik, Befehlslogik, Interaktion |
+| `freecad/frametools/image_tools.py` | Befehlslogik, Interaktion, Kalibrierungs-Workflow |
+| `freecad/frametools/image_homography.py` | Homographie, UV-Koordinaten |
+| `freecad/frametools/image_constraint_solver.py` | Kalibrierungs-Solver (Längen, Winkel, Optimierung) |
+| `freecad/frametools/image_point_alignment.py` | Punkt-/Eck-Ausrichtung, Warp-Matrix |
 | `freecad/frametools/reference_line.ui` | Dialog für Referenzlinien (Soll-Länge) |
 | `freecad/frametools/commands.py` | Toolbar-Befehle |
 | `freecad/frametools/init_gui.py` | Toolbar „Image“ |
@@ -27,6 +30,8 @@ Implementierungs- und Nutzerbeschreibung für die Bild-Werkzeuge des Frame-Tools
 7. [Scale Solver (Eckpunkt-Kalibrierung)](#scale-solver-eckpunkt-kalibrierung)
 8. [Auswahl-Regeln](#auswahl-regeln)
 9. [Abhängigkeiten](#abhängigkeiten)
+
+Weitere Dokumente: [README.md](README.md), [CALIBRATION_SOLVER.md](CALIBRATION_SOLVER.md) (mathematische Solver-Beschreibung).
 
 ---
 
@@ -311,6 +316,8 @@ y = (h₂₁·u + h₂₂·v + h₂₃) / (h₃₁·u + h₃₂·v + 1)
 
 **Ansatz:** Die vier XY-Positionen der Bildecken werden als Optimierungsvariablen bewegt (Z-Werte der Ecken bleiben fix). Daraus folgt eine Homographie `H`; Längen der Referenzlinien werden in UV-Raum berechnet (`_line_length_uv`).
 
+**Mathematik und Solver-Details:** [CALIBRATION_SOLVER.md](CALIBRATION_SOLVER.md) (Formeln, Residuen, `uniform_scale` vs. `corners`).
+
 ### Referenzlinien-Specs
 
 Für jede Linie:
@@ -322,26 +329,6 @@ target   = TargetLength
 ```
 
 Welding: Endpunkte ≤ 5 mm auseinander → ein gemeinsamer UV-Knoten (Mittelwert).
-
-### Optimierung (`_solve_corner_calibration`)
-
-**Variablen:** 8 Werte — X/Y der vier Ecken (`params0` aus aktuellem Zustand).
-
-**Residuen (`_calibration_residuals`) — einheitlich für alle Fälle:**
-
-| Term | Formel | Skalierung |
-|------|--------|------------|
-| Längenfehler | `L_modell − Soll` pro Linie | ÷ 0,01 mm |
-| Verzerrungsenergie | `√E_dist` | direkt |
-| Starre Translation | Schwerpunkt-Verschiebung der Ecken | ÷ 1 mm |
-
-**Hinweis:** Rotation wird nicht optimiert — Ausrichtung kommt vom Sketch bzw. Benutzer.
-
-**Verzerrungsenergie `E_dist`:** Null bei rein gleichförmiger Skalierung; positiv bei Anisotropie oder Scherung (`_distortion_energy` über Kanten-Basis-Matrix des Quads).
-
-**Solver:** `scipy.optimize.least_squares`, Toleranzen `1e-6`, max. 250 Auswertungen (optional Verfeinerung).
-
-Längenfehler dominieren bei überbestimmten Systemen; bei unterbestimmten Systemen (wenige Linien) selektieren Verzerrungsenergie und minimale Translation unter den Lösungen mit passenden Längen.
 
 ### Anwendung der Lösung
 
