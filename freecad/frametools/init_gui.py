@@ -15,7 +15,9 @@ class FrameWorkbench(Gui.Workbench):
     Icon = os.path.join(ICON_PATH, 'beam.svg')
     toolbox = ['Beam', 'CutMiter', 'CutPlane', 'CutShape', 'Reload']
     boxbox = ['LinkedFace', 'ExtrudedFace', 'FlatFace', 'FemSolver', 'ScrewMaker']
-    imagebox = ['AlignedImage', 'FeaturePair', 'ReferenceLine', 'ImageOverlay', 'ScaleSolver']
+    imagebox = [
+        'AlignedImage', 'FeaturePair', 'ImageOverlay',
+        'ImageCalibration']
 
     def GetClassName(self):
         return 'Gui::PythonWorkbench'
@@ -37,8 +39,7 @@ class FrameWorkbench(Gui.Workbench):
         Gui.addCommand('AlignedImage', commands.AlignedImage())
         Gui.addCommand('ImageOverlay', commands.ImageOverlay())
         Gui.addCommand('FeaturePair', commands.FeaturePair())
-        Gui.addCommand('ReferenceLine', commands.ReferenceLine())
-        Gui.addCommand('ScaleSolver', commands.ScaleSolver())
+        Gui.addCommand('ImageCalibration', commands.ImageCalibration())
 
         self.appendToolbar('Frame', self.toolbox)
         self.appendMenu('Frame', self.toolbox)

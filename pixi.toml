@@ -13,3 +13,6 @@ scipy = "*"
 
 [pypi-dependencies]
 "freecad.frametools" = { path = ".", editable = true }
+
+[tasks]
+tests = "freecadcmd tests/run_tests.py"

@@ -157,19 +157,6 @@ class FeaturePair(BaseCommand):
         }
 
 
-class ReferenceLine(BaseCommand):
-
-    def Activated(self):
-        image_tools.create_reference_line()
-
-    def GetResources(self):
-        return {
-            'Pixmap': os.path.join(ICON_PATH, 'reference_line.svg'),
-            'MenuText': 'Reference Line',
-            'ToolTip': 'Referenzlinie mit Soll-Länge erstellen',
-        }
-
-
 class ImageOverlay(BaseCommand):
 
     def Activated(self):
@@ -183,16 +170,19 @@ class ImageOverlay(BaseCommand):
         }
 
 
-class ScaleSolver(BaseCommand):
+class ImageCalibration(BaseCommand):
 
     def Activated(self):
-        image_tools.solve_reference_lines()
+        image_tools.create_image_calibration()
 
     def GetResources(self):
         return {
             'Pixmap': os.path.join(ICON_PATH, 'scale_solver.svg'),
-            'MenuText': 'Scale Solver',
-            'ToolTip': 'Orientierung/Skalierung anhand von Referenzlinien berechnen',
+            'MenuText': 'Image Calibration',
+            'ToolTip': (
+                'Kalibrierungs-Objekt mit Sketch — Doppelklick Sketch: '
+                'Geometrie, Doppelklick Objekt: Bedingungen, '
+                'Rechtsklick: Kalibrieren'),
         }
 
 
