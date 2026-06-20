@@ -76,10 +76,10 @@ class ImageCalibration(object):
             "Bild (ImagePlane oder AlignedImage)")
         obj.addProperty(
             "App::PropertyLink", "Sketch", "Calibration",
-            "Aktiver Sketch (Geometrie)")
+            "Ursprungs-Sketch (Geometrie zum Zeichnen)")
         obj.addProperty(
-            "App::PropertyLink", "InputSketch", "Calibration",
-            "Ursprungs-Sketch (Geometrie für jede Kalibrierung)")
+            "App::PropertyLink", "AlignedSketch", "Calibration",
+            "Kalibrierter Sketch (Kopie, bei jedem Solve neu erzeugt)")
         obj.addProperty(
             "App::PropertyString", "Constraints", "Constraints",
             "Bedingungen (JSON)").Constraints = dump_constraints(
@@ -94,7 +94,7 @@ class ImageCalibration(object):
         return
 
     def onChanged(self, obj, prop):
-        if prop in ("Sketch", "InputSketch", "Image"):
+        if prop in ("Sketch", "AlignedSketch", "Image"):
             vobj = getattr(obj, "ViewObject", None)
             if vobj is not None:
                 vobj.signalChangeIcon()
@@ -137,12 +137,11 @@ class ViewProviderImageCalibration(object):
         sketch = getattr(obj, "Sketch", None)
         if sketch is not None:
             children.append(sketch)
-        input_sketch = getattr(obj, "InputSketch", None)
-        if input_sketch is not None and input_sketch not in children:
-            vobj = getattr(input_sketch, "ViewObject", None)
-            if vobj is not None:
-                vobj.Visibility = False
-            children.append(input_sketch)
+        aligned_sketch = getattr(obj, "AlignedSketch", None)
+        if aligned_sketch is None:
+            aligned_sketch = getattr(obj, "InputSketch", None)
+        if aligned_sketch is not None and aligned_sketch not in children:
+            children.append(aligned_sketch)
         return children
 
     def setupContextMenu(self, vobj, menu):
@@ -193,8 +192,11 @@ def ensure_image_calibration(obj):
         obj.Constraints = dump_constraints(default_constraints())
     if not getattr(obj, "Lines", None):
         obj.Lines = dump_lines(default_lines())
+    if "AlignedSketch" not in obj.PropertiesList:
+        obj.addProperty(
+            "App::PropertyLink", "AlignedSketch", "Calibration",
+            "Kalibrierter Sketch (Kopie, bei jedem Solve neu erzeugt)")
     from freecad.frametools import image_tools
-    from freecad.frametools import image_objects
 
     img = getattr(obj, "Image", None)
     if img is None:
