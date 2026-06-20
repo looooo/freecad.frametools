@@ -65,7 +65,7 @@ class TestTrapezoidToRectangle(unittest.TestCase):
 
 
 class TestSingleLengthScale(unittest.TestCase):
-    """One length constraint scales the image uniformly."""
+    """One length constraint → uniform scaling about the image origin."""
 
     def test_uniform_scale_from_bottom_edge(self):
         corners = h.corners_rectangle(100.0, 100.0)
@@ -78,7 +78,97 @@ class TestSingleLengthScale(unittest.TestCase):
         self.assertIsNotNone(H)
         self.assertAlmostEqual(h.length_mm(H, line), target, delta=h.LENGTH_TOL_MM)
         self.assertLess(report["length_error"], h.LENGTH_TOL_MM)
+        self.assertLess(report["distortion_energy"], h.DISTORTION_TOL)
 
+    def test_one_length_uniformly_scales_square(self):
+        """Primary use case: one known length scales the whole image equally."""
+        corners = h.corners_rectangle(100.0, 100.0)
+        bottom = h.line_uv(0, 0.0, 0.0, 1.0, 0.0)
+        right = h.line_uv(1, 1.0, 0.0, 1.0, 1.0)
+        scale = 1.5
+        target = 100.0 * scale
+        specs = [h.length_spec(bottom, target)]
+        H, report = h.solve_corners(
+            corners, specs, line_meta=h.line_by_geo(bottom, right))
+        self.assertAlmostEqual(h.length_mm(H, bottom), target, delta=h.LENGTH_TOL_MM)
+        self.assertAlmostEqual(
+            h.length_mm(H, right), 100.0 * scale, delta=h.LENGTH_TOL_MM)
+        self.assertLess(report["distortion_energy"], h.DISTORTION_TOL)
+        self.assertEqual(report["mode"], "uniform_scale")
+        self.assertAlmostEqual(report["scale_factor"], scale, places=4)
+        c0, cx, c1, cy = h.corners_from_homography(H)
+        self.assertAlmostEqual(c0.distanceToPoint(cx), target, delta=h.LENGTH_TOL_MM)
+        self.assertAlmostEqual(c0.distanceToPoint(cy), target, delta=h.LENGTH_TOL_MM)
+
+    def test_one_length_uniformly_scales_trapezoid(self):
+        """Uniform scale multiplies every edge length by the same factor."""
+        start = h.corners_trapezoid(200.0, 160.0, 100.0, shear_top=25.0)
+        constrained = h.line_uv(0, 0.1, 0.0, 0.9, 0.0)
+        reference = h.line_uv(1, 0.0, 0.1, 0.0, 0.9)
+        H0 = h.homography_from_corners(start)
+        scale = 1.25
+        target = h.length_mm(H0, constrained) * scale
+        specs = [h.length_spec(constrained, target)]
+        H, report = h.solve_corners(
+            start, specs,
+            line_meta=h.line_by_geo(constrained, reference))
+        self.assertAlmostEqual(
+            h.length_mm(H, constrained), target, delta=h.LENGTH_TOL_MM)
+        self.assertAlmostEqual(
+            h.length_mm(H, reference),
+            h.length_mm(H0, reference) * scale,
+            delta=h.LENGTH_TOL_MM)
+        self.assertLess(report["distortion_energy"], h.DISTORTION_TOL)
+
+
+class TestTwoLengthScale(unittest.TestCase):
+    """Two length constraints on perpendicular edges → anisotropic 2D scale."""
+
+    def test_two_lengths_set_width_and_height(self):
+        corners = h.corners_rectangle(100.0, 100.0)
+        bottom = h.line_uv(0, 0.0, 0.0, 1.0, 0.0)
+        left = h.line_uv(1, 0.0, 0.0, 0.0, 1.0)
+        specs = [
+            h.length_spec(bottom, 150.0),
+            h.length_spec(left, 80.0),
+        ]
+        H, report = h.solve_corners(
+            corners, specs, line_meta=h.line_by_geo(bottom, left))
+        self.assertAlmostEqual(h.length_mm(H, bottom), 150.0, delta=h.LENGTH_TOL_MM)
+        self.assertAlmostEqual(h.length_mm(H, left), 80.0, delta=h.LENGTH_TOL_MM)
+        self.assertLess(report["length_error"], h.LENGTH_TOL_MM)
+        self.assertGreater(report["distortion_energy"], h.DISTORTION_TOL)
+
+    def test_two_lengths_from_skewed_start(self):
+        """Trapezoid + bottom/left targets → both lengths met."""
+        start = h.corners_trapezoid(220.0, 170.0, 110.0, shear_top=30.0)
+        bottom = h.line_uv(0, 0.1, 0.0, 0.9, 0.0)
+        left = h.line_uv(1, 0.0, 0.1, 0.0, 0.9)
+        specs = h.targets_from_reference(
+            h.corners_rectangle(200.0, 100.0), bottom, left)
+        H, report = h.solve_corners(
+            start, specs, line_meta=h.line_by_geo(bottom, left))
+        for spec in specs:
+            err = abs(h.length_mm(H, spec) - spec["target"])
+            self.assertLess(err, h.LENGTH_TOL_MM, msg=spec["label"])
+        self.assertLess(report["length_error"], h.LENGTH_TOL_MM)
+
+    def test_two_lengths_rebuild_axis_aligned_rectangle(self):
+        """Two targets on a square should yield a 150×80 mm rectangle."""
+        corners = h.corners_rectangle(100.0, 100.0)
+        bottom = h.line_uv(0, 0.0, 0.0, 1.0, 0.0)
+        left = h.line_uv(1, 0.0, 0.0, 0.0, 1.0)
+        specs = [
+            h.length_spec(bottom, 150.0),
+            h.length_spec(left, 80.0),
+        ]
+        H, report = h.solve_corners(
+            corners, specs, line_meta=h.line_by_geo(bottom, left))
+        c0, cx, c1, cy = h.corners_from_homography(H)
+        width = c0.distanceToPoint(cx)
+        height = c0.distanceToPoint(cy)
+        self.assertAlmostEqual(width, 150.0, delta=h.LENGTH_TOL_MM)
+        self.assertAlmostEqual(height, 80.0, delta=h.LENGTH_TOL_MM)
 
 class TestAxisConstraints(unittest.TestCase):
     """Horizontal / vertical alignment on skewed quads."""
@@ -154,6 +244,67 @@ class TestAxisConstraints(unittest.TestCase):
         finally:
             h.close_document(doc)
 
+    def test_horizontal_and_vertical_together(self):
+        """Both axis constraints satisfied on a skewed quad."""
+        H0 = h.homography_from_corners(self.skew)
+        self.assertGreater(
+            abs(h.axis_sin(H0, self.bottom, "horizontal")), h.SIN_TOL)
+        self.assertGreater(
+            abs(h.axis_sin(H0, self.left, "vertical")), h.SIN_TOL)
+
+        constraints = h.empty_constraints()
+        constraints["horizontal"] = [{"geo": 0}]
+        constraints["vertical"] = [{"geo": 1}]
+        specs = [
+            h.length_spec(self.bottom, h.length_mm(H0, self.bottom)),
+            h.length_spec(self.left, h.length_mm(H0, self.left)),
+        ]
+        H, report = h.solve_corners(
+            self.skew, specs,
+            constraints=constraints,
+            line_meta=h.line_by_geo(self.bottom, self.left))
+        self.assertLess(
+            abs(h.axis_sin(H, self.bottom, "horizontal")), h.SIN_TOL)
+        self.assertLess(
+            abs(h.axis_sin(H, self.left, "vertical")), h.SIN_TOL)
+        self.assertLess(report["length_error"], h.LENGTH_TOL_MM)
+
+    def test_horizontal_line_lies_on_sketch_x_after_rebuild(self):
+        """Horizontal (sketch +X) → rebuilt line parallel to sketch-X."""
+        import FreeCAD as App
+
+        doc = h.new_document("HorizRebuild")
+        try:
+            start = h.corners_trapezoid(200.0, 170.0, 100.0, shear_top=25.0)
+            img = h.make_aligned_image(doc, start)
+            sketch = h.make_sketch_on_image(doc, img)
+            line = h.line_uv(0, 0.05, 0.02, 0.95, 0.15)
+            H0 = h.homography_from_corners(start)
+            constraints = h.empty_constraints()
+            constraints["horizontal"] = [{"geo": 0}]
+            specs = [h.length_spec(line, h.length_mm(H0, line))]
+            H, report = h.solve_corners(
+                start, specs,
+                constraints=constraints,
+                line_meta=h.line_by_geo(line),
+                sketch=sketch)
+            self.assertLess(
+                abs(h.axis_sin(H, line, "horizontal", sketch=sketch)),
+                h.SIN_TOL)
+
+            corners = h.corners_from_homography(H)
+            image_tools._restore_aligned_corners(img, corners)
+            image_tools._sync_warp_from_corners(img)
+            image_tools._update_sketch_from_uv_lines(
+                sketch, img, [line])
+
+            seg = sketch.Geometry[0]
+            local = App.Vector(seg.EndPoint) - App.Vector(seg.StartPoint)
+            self.assertGreater(local.Length, 1e-6)
+            sin_xy = abs(local.y) / local.Length
+            self.assertLess(sin_xy, h.SIN_TOL)
+        finally:
+            h.close_document(doc)
 
 class TestAngleConstraints(unittest.TestCase):
     """Parallel and perpendicular constraints between two lines."""

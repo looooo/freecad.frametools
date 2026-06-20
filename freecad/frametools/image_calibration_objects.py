@@ -79,7 +79,7 @@ class ImageCalibration(object):
             "Aktiver Sketch (Geometrie)")
         obj.addProperty(
             "App::PropertyLink", "InputSketch", "Calibration",
-            "Sketch vor der letzten Kalibrierung")
+            "Ursprungs-Sketch (Geometrie für jede Kalibrierung)")
         obj.addProperty(
             "App::PropertyString", "Constraints", "Constraints",
             "Bedingungen (JSON)").Constraints = dump_constraints(
@@ -127,12 +127,13 @@ class ViewProviderImageCalibration(object):
         img = getattr(obj, "Image", None)
         if img is not None:
             children.append(img)
-            if image_objects.is_aligned_image(img):
-                source = getattr(img, "SourceImage", None)
-                if source is not None:
-                    vobj = getattr(source, "ViewObject", None)
-                    if vobj is not None:
-                        vobj.Visibility = False
+            from freecad.frametools import image_point_alignment as pa
+            aligned = pa.find_aligned_image_for_source(img)
+            if aligned is not None and aligned not in children:
+                children.append(aligned)
+                vobj = getattr(img, "ViewObject", None)
+                if vobj is not None:
+                    vobj.Visibility = False
         sketch = getattr(obj, "Sketch", None)
         if sketch is not None:
             children.append(sketch)
@@ -196,12 +197,7 @@ def ensure_image_calibration(obj):
     from freecad.frametools import image_objects
 
     img = getattr(obj, "Image", None)
-    if img is not None and not image_objects.is_aligned_image(img):
-        aligned = image_tools.ensure_aligned_image(img)
-        if aligned is not None and obj.Image != aligned:
-            obj.Image = aligned
-    elif img is None:
+    if img is None:
         recovered = image_tools._recover_calibration_image(obj)
         if recovered is not None:
-            aligned = image_tools.ensure_aligned_image(recovered)
-            obj.Image = aligned if aligned is not None else recovered
+            obj.Image = recovered

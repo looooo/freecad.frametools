@@ -53,6 +53,10 @@ _restore_aligned_corners = pa._restore_aligned_corners
 _solve_corner_calibration = cs._solve_corner_calibration
 _remap_constraint_geos = cs._remap_constraint_geos
 _axis_alignment_sin = cs._axis_alignment_sin
+_constraints_need_geo_remap = cs._constraints_need_geo_remap
+_constraint_line_index = cs._constraint_line_index
+_constraint_line_pair = cs._constraint_line_pair
+_reference_image_from_selection = pa._reference_image_from_selection
 
 _REF_LINE_ENDPOINT_SNAP_MM = cs.REF_LINE_ENDPOINT_SNAP_MM
 _REF_LINE_SNAP_PIXELS = 12
@@ -664,8 +668,11 @@ def _lines_meta_for_calibration(cal_obj, sketch, img):
             "v0": float(s["v0"]),
             "u1": float(s["u1"]),
             "v1": float(s["v1"]),
+            "w0": line["w0"],
+            "w1": line["w1"],
         })
-    return _weld_sketch_line_uvs(merged), welds
+    merged, merge_welds = _weld_sketch_line_uvs(merged)
+    return merged, welds + merge_welds
 def _line_by_geo_from_snapshot(lines_meta):
     return cs._line_by_index_from_lines_meta(lines_meta)
 def _rebuild_sketch_from_uv_lines(img, lines_meta, doc, label_base="CalibSketch"):
@@ -674,8 +681,7 @@ def _rebuild_sketch_from_uv_lines(img, lines_meta, doc, label_base="CalibSketch"
     _update_sketch_from_uv_lines(sketch, img, lines_meta)
     return sketch
 def _update_sketch_from_uv_lines(sketch, img, lines_meta):
-    """Replace all lines on an existing sketch (keeps object link stable)."""
-    sketch.Placement = _sketch_placement_from_image(img)
+    """Replace sketch lines; Placement stays fixed, only geometry moves."""
     for i in range(sketch.GeometryCount - 1, -1, -1):
         sketch.delGeometry(i)
     plm_inv = sketch.Placement.inverse()
@@ -691,18 +697,99 @@ def _clone_sketch(sketch, doc, label_base="CalibSketch_input"):
     clone = doc.addObject("Sketcher::SketchObject", name)
     clone.Placement = App.Placement(sketch.Placement)
     for i in range(sketch.GeometryCount):
-        clone.addGeometry(sketch.getGeometry(i), False)
+        clone.addGeometry(sketch.Geometry[i], False)
     return clone
-def _calibration_sketch(cal_obj, restore_link=False):
-    """Sketch used for geometry and constraint UI (stable cal_obj.Sketch link)."""
+
+
+def _calibration_image_is_valid(img):
+    return is_image_object(img)
+
+
+def _calibration_image_candidates(doc):
+    if doc is None:
+        return []
+    return [o for o in doc.Objects if is_image_object(o)]
+
+
+def _recover_calibration_image(cal_obj):
+    doc = cal_obj.Document
+    candidates = _calibration_image_candidates(doc)
+    if not candidates:
+        return None
+
+    sketch = getattr(cal_obj, "Sketch", None)
+    if sketch is not None:
+        sketch_origin = sketch.Placement.Base
+        best = None
+        best_dist = None
+        for obj in candidates:
+            try:
+                c0 = pa._corners_for_image(obj)[0]
+                dist = c0.distanceToPoint(sketch_origin)
+                if best_dist is None or dist < best_dist:
+                    best_dist = dist
+                    best = obj
+            except Exception:
+                continue
+        if best is not None and best_dist is not None:
+            return best
+
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def _source_image_for_calibration(cal_obj):
+    """Original ImagePlane linked on the calibration object."""
+    raw = getattr(cal_obj, "Image", None)
+    img = pa._linked_object(raw)
+    if img is not None and image_objects.is_aligned_image(img):
+        source = getattr(img, "SourceImage", None)
+        if source is not None:
+            return source
+    if _calibration_image_is_valid(img):
+        return img
+    if _calibration_image_is_valid(raw):
+        return raw
+    return _recover_calibration_image(cal_obj)
+
+
+def _image_for_calibration(cal_obj, write_back=False):
+    img = _source_image_for_calibration(cal_obj)
+    if img is not None and write_back and cal_obj.Image != img:
+        cal_obj.Image = img
+    return img
+
+
+def _ensure_origin_sketch(cal_obj):
+    """Keep an immutable copy of the user sketch for repeated solves."""
+    sketch = getattr(cal_obj, "Sketch", None)
+    if sketch is None or getattr(sketch, "Document", None) is None:
+        return None
+    origin = getattr(cal_obj, "InputSketch", None)
+    if origin is not None and getattr(origin, "Document", None) is not None:
+        return origin
+    doc = cal_obj.Document
+    cal_obj.InputSketch = _clone_sketch(
+        sketch, doc,
+        label_base="{}_origin".format(sketch.Label))
+    if getattr(cal_obj.InputSketch, "ViewObject", None):
+        cal_obj.InputSketch.ViewObject.Visibility = False
+    return cal_obj.InputSketch
+
+
+def _origin_sketch(cal_obj):
+    origin = getattr(cal_obj, "InputSketch", None)
+    if origin is not None and getattr(origin, "Document", None) is not None:
+        return origin
+    return _calibration_sketch(cal_obj)
+
+
+def _calibration_sketch(cal_obj):
+    """Display sketch linked on the calibration object."""
     sketch = getattr(cal_obj, "Sketch", None)
     if sketch is not None and getattr(sketch, "Document", None) is not None:
         return sketch
-    backup = getattr(cal_obj, "InputSketch", None)
-    if backup is not None and getattr(backup, "Document", None) is not None:
-        if restore_link:
-            cal_obj.Sketch = backup
-        return backup
     return None
 def _line_by_geo_from_snapshot(lines_meta):
     return {int(line["geo"]): line for line in lines_meta}
@@ -798,6 +885,7 @@ def create_sketch_for_calibration(cal_obj):
     doc.openTransaction("Create Calibration Sketch")
     try:
         sketch = create_sketch_on_image(img, doc)
+        cal_obj.InputSketch = None
         cal_obj.Sketch = sketch
         doc.commitTransaction()
         doc.recompute()
@@ -808,42 +896,56 @@ def create_sketch_for_calibration(cal_obj):
         doc.abortTransaction()
         raise
 def _aligned_image_for_solve(cal_obj):
-    """Create AlignedImage from ImagePlane only when solving."""
-    img = _image_for_calibration(cal_obj, write_back=True)
-    if not _calibration_image_is_valid(img):
+    """Working AlignedImage; reset from source plane before each solve."""
+    source = _source_image_for_calibration(cal_obj)
+    if not _calibration_image_is_valid(source):
         return None
-    if image_objects.is_aligned_image(img):
-        return img
-    existing = find_aligned_image_for_source(img)
-    if existing is not None:
-        return existing
-    return pa.create_aligned_image_from_plane(img)
+    aligned = pa.find_aligned_image_for_source(source)
+    if aligned is None:
+        aligned = pa.create_aligned_image_from_plane(source)
+    else:
+        pa._reset_aligned_from_source(aligned, source)
+    return aligned
+
+
+def _axis_sketch_for_calibration(cal_obj):
+    """Fixed sketch frame for horizontal / vertical (Sketch-X / Sketch-Y)."""
+    return _calibration_sketch(cal_obj)
+
+
 def solve_image_calibration(cal_obj):
-    img = _image_for_calibration(cal_obj, write_back=True)
-    if not _calibration_image_is_valid(img):
+    source_img = _image_for_calibration(cal_obj)
+    if not _calibration_image_is_valid(source_img):
         App.Console.PrintError(
             "ImageCalibration: Bild (ImagePlane oder AlignedImage) "
             "erforderlich.\n")
         return
 
-    sketch = _calibration_sketch(cal_obj, restore_link=True)
-    if sketch is None or sketch.TypeId != "Sketcher::SketchObject":
+    display_sketch = _calibration_sketch(cal_obj)
+    if display_sketch is None or display_sketch.TypeId != "Sketcher::SketchObject":
         App.Console.PrintError("ImageCalibration: Sketch erforderlich.\n")
         return
 
+    _ensure_origin_sketch(cal_obj)
+    origin_sketch = _origin_sketch(cal_obj)
+    if origin_sketch is None:
+        App.Console.PrintError("ImageCalibration: Ursprungs-Sketch fehlt.\n")
+        return
+
+    axis_sketch = _axis_sketch_for_calibration(cal_obj)
+
     constraints = image_calibration_objects.parse_constraints(
         cal_obj.Constraints)
-    constraints = cs._remap_constraints_to_sketch(constraints, sketch)
+    constraints = cs._remap_constraints_to_sketch(constraints, origin_sketch)
 
     aligned = _aligned_image_for_solve(cal_obj)
     if aligned is None:
         App.Console.PrintError(
             "ImageCalibration: AlignedImage konnte nicht erzeugt werden.\n")
         return
-    if cal_obj.Image != aligned:
-        cal_obj.Image = aligned
 
-    lines_meta, welds = _lines_meta_for_calibration(cal_obj, sketch, aligned)
+    lines_meta, welds = _lines_meta_for_calibration(
+        cal_obj, origin_sketch, aligned)
     if not lines_meta:
         App.Console.PrintError("Sketch enthält keine Linien.\n")
         return
@@ -866,7 +968,7 @@ def solve_image_calibration(cal_obj):
                 len(constraints.get("perpendicular", []))))
         App.Console.PrintMessage("Ausrichtung vor Optimierung:\n")
         cs._print_axis_constraint_report(
-            constraints, line_by_geo, H0, sketch)
+            constraints, line_by_geo, H0, axis_sketch)
         n_active = sum(
             1 for key in ("horizontal", "vertical")
             for item in constraints.get(key, [])
@@ -884,29 +986,18 @@ def solve_image_calibration(cal_obj):
     try:
         corners_new, H_new, opt_info, meta = compute_calibration_from_specs(
             length_specs, aligned, constraints=constraints,
-            line_by_geo=line_by_geo, sketch=sketch)
+            line_by_geo=line_by_geo, sketch=axis_sketch)
 
         if welds:
             App.Console.PrintMessage(
                 "Sketch-Endpunkte: {} zusammengeführt (≤ {:.1f} mm)\n".format(
                     welds, _REF_LINE_ENDPOINT_SNAP_MM))
 
-        cs._print_scale_solver_debug(
-            [], H_new, length_specs,
-            "Vor Transformation (Sketch)", opt_info, meta)
-
         pa._restore_aligned_corners(aligned, corners_new)
         pa._sync_warp_from_corners(aligned)
         pa._refresh_aligned_view(aligned)
 
-        if getattr(cal_obj, "InputSketch", None) is None:
-            cal_obj.InputSketch = _clone_sketch(
-                sketch, doc,
-                label_base="{}_input".format(sketch.Label))
-            if getattr(cal_obj.InputSketch, "ViewObject", None):
-                cal_obj.InputSketch.ViewObject.Visibility = False
-
-        _update_sketch_from_uv_lines(sketch, aligned, lines_meta)
+        _update_sketch_from_uv_lines(display_sketch, aligned, lines_meta)
 
         _store_calibration_lines(cal_obj, lines_meta)
         cal_obj.Constraints = image_calibration_objects.dump_constraints(
@@ -915,26 +1006,15 @@ def solve_image_calibration(cal_obj):
         doc.commitTransaction()
         doc.recompute()
 
-        cs._print_scale_solver_debug(
-            [], H_new, length_specs,
-            "Nach Transformation (Sketch)", meta=meta)
-        n_axis = (
-            len(constraints.get("horizontal", []))
-            + len(constraints.get("vertical", [])))
-        if n_axis:
-            App.Console.PrintMessage("Achs-Ausrichtung nach Solve:\n")
-            cs._print_axis_constraint_report(
-                constraints, line_by_geo, H_new, sketch)
-        rigid = meta.get("rigid_motion", {})
+        cs._print_calibration_constraint_report(
+            constraints, line_by_geo, H_new, length_specs,
+            sketch=axis_sketch, meta=meta, opt_info=opt_info)
         App.Console.PrintMessage(
-            "Kalibrierung abgeschlossen. Sketch '{}' aktualisiert — "
-            "weitere Bedingungen im Dialog ergänzen und erneut kalibrieren.\n".format(
-                sketch.Label))
-        App.Console.PrintMessage(
-            "E={:.4e}, Δ={:.3f} mm, θ={:.3f}°\n".format(
-                meta.get("distortion_energy", 0.0),
-                rigid.get("translation_mm", 0.0),
-                rigid.get("rotation_deg", 0.0)))
+            "Kalibrierung abgeschlossen. Sketch '{}' aktualisiert "
+            "(Geometrie aus '{}', Bild aus '{}').\n".format(
+                display_sketch.Label,
+                origin_sketch.Label,
+                source_img.Label))
     except Exception as exc:
         doc.abortTransaction()
         App.Console.PrintError("Kalibrierung fehlgeschlagen: {}\n".format(exc))
@@ -958,11 +1038,15 @@ def create_image_calibration():
     doc = App.ActiveDocument
     doc.openTransaction("Create Image Calibration")
     try:
-        aligned = pa.ensure_aligned_image(img)
+        source = img
+        if image_objects.is_aligned_image(img):
+            plane = getattr(img, "SourceImage", None)
+            if plane is not None:
+                source = plane
         obj = doc.addObject("App::FeaturePython", "ImageCalibration")
         image_calibration_objects.ImageCalibration(obj)
-        obj.Image = aligned
-        sketch = create_sketch_on_image(aligned, doc)
+        obj.Image = source
+        sketch = create_sketch_on_image(source, doc)
         obj.Sketch = sketch
         image_calibration_objects.ViewProviderImageCalibration(obj.ViewObject)
         image_calibration_objects.ensure_image_calibration(obj)
@@ -970,9 +1054,9 @@ def create_image_calibration():
         doc.commitTransaction()
         doc.recompute()
         App.Console.PrintMessage(
-            "ImageCalibration erstellt — AlignedImage '{}', Sketch '{}' "
+            "ImageCalibration erstellt — Bild '{}', Sketch '{}' "
             "(Doppelklick Sketch: Geometrie, Doppelklick Objekt: Bedingungen).\n".format(
-                aligned.Label, sketch.Label))
+                source.Label, sketch.Label))
     except Exception:
         doc.abortTransaction()
         raise
@@ -983,7 +1067,7 @@ def draw_calibration_sketch_for(cal_obj):
     if cal_obj.Sketch is None:
         create_sketch_for_calibration(cal_obj)
     else:
-        sketch = _calibration_sketch(cal_obj, restore_link=True)
+        sketch = _calibration_sketch(cal_obj)
         if sketch is not None:
             _activate_sketch_drawing(sketch)
 def draw_calibration_sketch():
@@ -1265,8 +1349,11 @@ class ImageCalibrationConstraintsDialog(object):
         hint = QtGui.QLabel(
             "Parametrisch: Kanten L0, L1, … und Bedingungen am Objekt "
             "gespeichert. Minimale Bedingungen setzen, „Kalibrieren“, Ergebnis "
-            "prüfen, weitere Bedingungen ergänzen, erneut kalibrieren. "
-            "Horizontal = Sketch-X, Senkrecht = Sketch-Y.")
+            "prüfen, weitere Bedingungen ergänzen, erneut kalibrieren.\n"
+            "Horizontal / Senkrecht: Kante parallel zur festen Sketch-Achse "
+            "(Sketch-X bzw. Sketch-Y) — nur das Bild wird verzerrt, die "
+            "Sketch-Platzierung bleibt unverändert; nach dem Solve werden "
+            "nur die Linien-Endpunkte neu gesetzt.")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
@@ -1319,7 +1406,9 @@ class ImageCalibrationConstraintsDialog(object):
             QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel)
 
     def _refresh_sketch_lines(self):
-        self.sketch = _calibration_sketch(self.cal_obj, restore_link=True)
+        self.sketch = _origin_sketch(self.cal_obj)
+        if self.sketch is None:
+            self.sketch = _calibration_sketch(self.cal_obj)
         self.lines = []
         if self.sketch is not None:
             for line_idx, (geo_idx, seg) in enumerate(
@@ -1524,10 +1613,19 @@ class ImageCalibrationConstraintsDialog(object):
         self.constraints = constraints
 
     def _sync_lines_from_sketch(self):
-        img = _image_for_calibration(self.cal_obj)
-        if self.sketch is None or img is None:
+        _ensure_origin_sketch(self.cal_obj)
+        source = _source_image_for_calibration(self.cal_obj)
+        if source is None:
             return
-        lines_meta, _ = _snapshot_sketch_lines_uv(self.sketch, img)
+        aligned = pa.find_aligned_image_for_source(source)
+        if aligned is not None:
+            pa._reset_aligned_from_source(aligned, source)
+        else:
+            aligned = source
+        sketch = _origin_sketch(self.cal_obj)
+        if sketch is None:
+            return
+        lines_meta, _ = _snapshot_sketch_lines_uv(sketch, aligned)
         if lines_meta:
             _store_calibration_lines(self.cal_obj, lines_meta)
 

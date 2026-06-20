@@ -140,6 +140,13 @@ def find_aligned_image_for_source(img):
     return None
 
 
+def _reset_aligned_from_source(aligned, source):
+    """Restore AlignedImage corners from the source ImagePlane."""
+    c0, cx, c1, cy, _ = _corners_from_image_plane(source)
+    _restore_aligned_corners(aligned, (c0, cx, c1, cy))
+    _sync_warp_from_corners(aligned)
+
+
 def ensure_aligned_image(img):
     if image_objects.is_aligned_image(img):
         _ensure_corner1_property(img)

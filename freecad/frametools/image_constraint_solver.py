@@ -53,6 +53,17 @@ def _sketch_axis_directions_xy(sketch):
 
 
 def _axis_alignment_sin(line, H, axis, sketch=None):
+    """Sin(angle) between a line (world XY) and a reference axis.
+
+    axis \"u\" / horizontal: parallel to sketch +X when *sketch* is given,
+    else parallel to the image U direction from H.
+    axis \"v\" / vertical: parallel to sketch +Y when *sketch* is given,
+    else parallel to the image V direction from H.
+
+    Image calibration always passes the linked Sketch so horizontal /
+    vertical mean parallel to the fixed Sketch coordinate axes; only
+    bilinear image corners are optimized, not sketch placement.
+    """
     d = hg._direction_xy_from_uv_line(
         line["u0"], line["v0"], line["u1"], line["v1"], H)
     if sketch is not None:
@@ -236,6 +247,15 @@ def _calibration_residuals(
     return np.concatenate(parts)
 
 
+def _deviation_deg_from_sin(sin_val):
+    return abs(float(np.degrees(np.arcsin(np.clip(sin_val, -1.0, 1.0)))))
+
+
+def _deviation_deg_from_perpendicular_dot(dot_val):
+    return abs(
+        90.0 - np.degrees(np.arccos(np.clip(abs(dot_val), 0.0, 1.0))))
+
+
 def _print_axis_constraint_report(constraints, line_by_geo, H, sketch=None):
     for label, key, axis in (
             ("Horizontal", "horizontal", "u"),
@@ -247,9 +267,192 @@ def _print_axis_constraint_report(constraints, line_by_geo, H, sketch=None):
                     "  {}: Kante L{} nicht im Sketch.\n".format(label, g))
                 continue
             sin_a = _axis_alignment_sin(line_by_geo[g], H, axis, sketch)
-            deg = abs(np.degrees(np.arcsin(np.clip(sin_a, -1.0, 1.0))))
+            deg = _deviation_deg_from_sin(sin_a)
             App.Console.PrintMessage(
                 "  {} L{}: Abweichung {:.3f}°\n".format(label, g, deg))
+
+
+def _print_calibration_constraint_report(
+        constraints, line_by_geo, H, length_specs, sketch=None,
+        meta=None, opt_info=None):
+    """Report residual error for every active calibration constraint."""
+    App.Console.PrintMessage("\n=== Bedingungen nach Kalibrierung ===\n")
+
+    max_len_delta = 0.0
+    if length_specs:
+        App.Console.PrintMessage("Soll-Längen:\n")
+        for spec in length_specs:
+            actual = _predicted_line_length_spec(spec, H)
+            target = float(spec["target"])
+            delta = actual - target
+            max_len_delta = max(max_len_delta, abs(delta))
+            App.Console.PrintMessage(
+                "  {}: Ist {:.4f} mm, Soll {:.4f} mm, Δ {:+.4f} mm\n".format(
+                    spec.get("label", "?"), actual, target, delta))
+    else:
+        App.Console.PrintMessage("Soll-Längen: (keine)\n")
+
+    max_angle_delta = 0.0
+
+    def report_axis(label, key, axis):
+        nonlocal max_angle_delta
+        items = constraints.get(key, [])
+        if not items:
+            return
+        App.Console.PrintMessage("{}:\n".format(label))
+        for item in items:
+            g = _constraint_line_index(item)
+            if g not in line_by_geo:
+                App.Console.PrintWarning(
+                    "  L{}: nicht im Sketch.\n".format(g))
+                continue
+            sin_a = _axis_alignment_sin(line_by_geo[g], H, axis, sketch)
+            deg = _deviation_deg_from_sin(sin_a)
+            max_angle_delta = max(max_angle_delta, deg)
+            App.Console.PrintMessage(
+                "  L{}: Abweichung {:.3f}°\n".format(g, deg))
+
+    report_axis("Horizontal (parallel Sketch +X)", "horizontal", "u")
+    report_axis("Senkrecht (parallel Sketch +Y)", "vertical", "v")
+
+    parallel_items = constraints.get("parallel", [])
+    if parallel_items:
+        App.Console.PrintMessage("Parallel:\n")
+        for item in parallel_items:
+            ga, gb = _constraint_line_pair(item)
+            if ga not in line_by_geo or gb not in line_by_geo:
+                App.Console.PrintWarning(
+                    "  L{} ∥ L{}: Kante fehlt im Sketch.\n".format(ga, gb))
+                continue
+            la, lb = line_by_geo[ga], line_by_geo[gb]
+            da = hg._direction_xy_from_uv_line(
+                la["u0"], la["v0"], la["u1"], la["v1"], H)
+            db = hg._direction_xy_from_uv_line(
+                lb["u0"], lb["v0"], lb["u1"], lb["v1"], H)
+            deg = _deviation_deg_from_sin(hg._parallel_sin_xy(da, db))
+            max_angle_delta = max(max_angle_delta, deg)
+            App.Console.PrintMessage(
+                "  L{} ∥ L{}: Abweichung {:.3f}°\n".format(ga, gb, deg))
+
+    perp_items = constraints.get("perpendicular", [])
+    if perp_items:
+        App.Console.PrintMessage("Rechtwinklig:\n")
+        for item in perp_items:
+            ga, gb = _constraint_line_pair(item)
+            if ga not in line_by_geo or gb not in line_by_geo:
+                App.Console.PrintWarning(
+                    "  L{} ⊥ L{}: Kante fehlt im Sketch.\n".format(ga, gb))
+                continue
+            la, lb = line_by_geo[ga], line_by_geo[gb]
+            da = hg._direction_xy_from_uv_line(
+                la["u0"], la["v0"], la["u1"], la["v1"], H)
+            db = hg._direction_xy_from_uv_line(
+                lb["u0"], lb["v0"], lb["u1"], lb["v1"], H)
+            dot = float(np.dot(da, db))
+            deg = _deviation_deg_from_perpendicular_dot(dot)
+            max_angle_delta = max(max_angle_delta, deg)
+            App.Console.PrintMessage(
+                "  L{} ⊥ L{}: Abweichung {:.3f}° von 90°\n".format(
+                    ga, gb, deg))
+
+    App.Console.PrintMessage("\nZusammenfassung:\n")
+    if length_specs:
+        App.Console.PrintMessage(
+            "  Längen: max |Δ| = {:.4f} mm "
+            "(Toleranz {:.3f} mm)\n".format(
+                max_len_delta, _CALIB_LENGTH_TOLERANCE_MM))
+    if max_angle_delta > 0.0:
+        App.Console.PrintMessage(
+            "  Winkel: max Abweichung = {:.3f}° "
+            "(Toleranz {:.1f}°)\n".format(
+                max_angle_delta, np.degrees(np.arcsin(_CALIB_ANGLE_TOLERANCE_RAD))))
+    if meta is not None:
+        rigid = meta.get("rigid_motion", {})
+        App.Console.PrintMessage(
+            "  Verzerrungsenergie E = {:.4e}\n".format(
+                meta.get("distortion_energy", 0.0)))
+        App.Console.PrintMessage(
+            "  Starre Bewegung: Δ = {:.3f} mm, θ = {:.3f}°\n".format(
+                rigid.get("translation_mm", 0.0),
+                rigid.get("rotation_deg", 0.0)))
+        if "exact" in meta:
+            App.Console.PrintMessage(
+                "  Längen exakt (< {:.3f} mm): {}\n".format(
+                    _CALIB_LENGTH_TOLERANCE_MM, meta.get("exact", False)))
+        move = meta.get("corner_move")
+        if move:
+            App.Console.PrintMessage(
+                "  Eck-Verschiebung: max={:.4f} mm, rms={:.4f} mm\n".format(
+                    move.get("max_mm", 0.0), move.get("rms_mm", 0.0)))
+    if opt_info is not None:
+        App.Console.PrintMessage(
+            "  Optimierung: cost={:.6e}, success={}\n".format(
+                opt_info.get("cost", 0.0), opt_info.get("success", True)))
+        res = opt_info.get("residuals")
+        if res is not None and length_specs:
+            parts = []
+            for spec, r in zip(length_specs, res):
+                parts.append("{}={:+.4f}".format(
+                    spec.get("label", "?"), float(r)))
+            if parts:
+                App.Console.PrintMessage(
+                    "  Restfehler Längen [mm]: {}\n".format(", ".join(parts)))
+
+
+def _can_use_uniform_scale_solver(specs, constraints):
+    """Single length, no angle constraints → uniform scale about UV origin."""
+    if len(specs) != 1:
+        return False
+    return not _has_angle_constraints(constraints)
+
+
+def _uniform_scale_params(params0, scale):
+    """Scale all quad corners about c0 (UV origin); c0 stays fixed."""
+    params = np.asarray(params0, dtype=float).copy()
+    c0x, c0y = params[0], params[1]
+    for i in range(0, len(params), 2):
+        params[i] = c0x + scale * (params0[i] - c0x)
+        params[i + 1] = c0y + scale * (params0[i + 1] - c0y)
+    return params
+
+
+def _solve_uniform_scale_calibration(specs, params0, z_vals):
+    """Analytic uniform scale from one target length (similarity about c0)."""
+    corners0 = hg._corners_from_xy_params(params0, z_vals)
+    H0 = hg._homography_from_corners(*corners0)
+    spec = specs[0]
+    current = hg._line_length_uv(
+        spec["u0"], spec["v0"], spec["u1"], spec["v1"], H0)
+    if current < 1e-12:
+        raise ValueError("Degenerate line for uniform scale")
+    scale = float(spec["target"]) / current
+    params = _uniform_scale_params(params0, scale)
+    corners = hg._corners_from_xy_params(params, z_vals)
+    H = hg._homography_from_corners(*corners)
+    length_res = _length_residuals_for_specs(specs, H)
+    max_len_err = max((abs(r) for r in length_res), default=0.0)
+    E_dist = _distortion_energy(params, params0, z_vals)
+    rigid = _rigid_motion_stats(params, params0, z_vals)
+    move = _corner_movement_stats(params, params0)
+    opt_info = {
+        "cost": 0.0,
+        "success": True,
+        "residuals": length_res,
+        "distortion_energy": E_dist,
+        "rigid_motion": rigid,
+        "corner_move": move,
+        "scale_factor": scale,
+    }
+    meta = {
+        "mode": "uniform_scale",
+        "exact": max_len_err < _CALIB_LENGTH_TOLERANCE_MM,
+        "distortion_energy": E_dist,
+        "rigid_motion": rigid,
+        "corners": corners,
+        "corner_move": move,
+        "scale_factor": scale,
+    }
+    return corners, H, opt_info, meta
 
 
 def _solve_corner_calibration(
@@ -257,6 +460,9 @@ def _solve_corner_calibration(
         sketch=None):
     if least_squares is None:
         raise RuntimeError("scipy is required for corner calibration")
+
+    if _can_use_uniform_scale_solver(specs, constraints):
+        return _solve_uniform_scale_calibration(specs, params0, z_vals)
 
     residual_fn = lambda params: _calibration_residuals(
         params, specs, params0, z_vals,
@@ -387,6 +593,8 @@ def _print_scale_solver_debug(lines, H, specs, phase, opt_info=None, meta=None):
             "corners": (
                 "Eckpunkt-Optimierung — Längen, Verzerrungsenergie, "
                 "min. Translation (einheitliches least_squares)"),
+            "uniform_scale": (
+                "Einheitliche Skalierung um Bildeckpunkt (eine Soll-Länge)"),
         }
         App.Console.PrintMessage(
             "  Modus: {}\n".format(mode_labels.get(mode, mode)))

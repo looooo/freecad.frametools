@@ -13,6 +13,7 @@ from freecad.frametools import image_tools
 LENGTH_TOL_MM = 0.05
 ANGLE_TOL_DEG = 1.0
 SIN_TOL = float(np.sin(np.deg2rad(ANGLE_TOL_DEG)))
+DISTORTION_TOL = 1e-4
 
 
 def vec(x, y, z=0.0):
@@ -146,8 +147,21 @@ def solve_corners(corners, specs, constraints=None, line_meta=None, sketch=None)
         "length_error": max_len_err,
         "success": opt_info.get("success"),
         "exact": meta.get("exact"),
+        "distortion_energy": meta.get("distortion_energy", 0.0),
+        "mode": meta.get("mode"),
+        "scale_factor": opt_info.get("scale_factor"),
     }
     return H, report
+
+
+def corners_from_homography(H, z=0.0):
+    """Recover quad corners from homography (UV unit square)."""
+    return (
+        image_tools._apply_homography_uv(0.0, 0.0, H, z),
+        image_tools._apply_homography_uv(1.0, 0.0, H, z),
+        image_tools._apply_homography_uv(1.0, 1.0, H, z),
+        image_tools._apply_homography_uv(0.0, 1.0, H, z),
+    )
 
 
 def new_document(name="TestCalibration"):
