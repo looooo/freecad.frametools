@@ -273,11 +273,7 @@ def _angle_preserving_energy(params, params0, z_vals):
 
 
 def _angle_energy_side_residuals(params, params0, z_vals):
-    """Weighted sqrt(E_angle,k) terms; always included in corner calibration.
-
-    Uses the same weight constant w as sketch angle constraints; E is
-    dimensionless so no extra 1/τ_L-style divisor on top of w.
-    """
+    """Weighted sqrt(E_angle,k) side terms (corner calibration, rank < 6)."""
     w = _CALIB_ANGLE_WEIGHT
     return np.array([
         w * np.sqrt(max(E_k, 0.0))
@@ -365,9 +361,9 @@ def _primary_constraint_rank(
         sketch=None):
     """Rank of primary constraint Jacobian at *params0*.
 
-    Returns (rank, n_primary, include_translation_side).
-    Centroid translation is appended only when rank < effective DOF (6).
-    E_angle side terms are always included in the residual vector.
+    Returns (rank, n_primary, include_angle_energy).
+    E_angle side terms apply only when rank < effective DOF (6).
+    Centroid translation is always in the corner-calibration residual vector.
     """
 
     def func(params):
@@ -381,8 +377,8 @@ def _primary_constraint_rank(
         return 0, 0, True
     J = _numerical_jacobian(func, params0)
     rank = _matrix_rank(J)
-    include_translation = rank < _CORNER_EFFECTIVE_DOF
-    return rank, n_primary, include_translation
+    include_angle = rank < _CORNER_EFFECTIVE_DOF
+    return rank, n_primary, include_angle
 
 
 def _determinacy_label(rank, n_primary, effective_dof=_CORNER_EFFECTIVE_DOF):
@@ -414,18 +410,19 @@ def _count_angle_constraints(constraints, line_by_geo):
 
 
 def _solver_diagnostics_meta(
-        rank, n_primary, include_translation, mode,
+        rank, n_primary, include_angle_energy, mode,
         n_lengths=None, n_angles=None):
     det = _determinacy_label(rank, n_primary)
+    centroid_in_residuals = mode == "corners"
     return {
         "mode": mode,
         "constraint_rank": rank,
         "primary_constraint_count": n_primary,
         "corner_param_dof": _CORNER_PARAM_DOF,
         "effective_dof": _CORNER_EFFECTIVE_DOF,
-        "include_side_terms": include_translation,
-        "include_translation_side": include_translation,
-        "include_distortion_energy": True,
+        "include_side_terms": include_angle_energy,
+        "include_translation_side": centroid_in_residuals,
+        "include_distortion_energy": include_angle_energy,
         "determinacy": det,
         "n_length_constraints": n_lengths,
         "n_angle_constraints": n_angles,
@@ -494,10 +491,11 @@ def _print_solver_diagnostics(meta=None, opt_info=None, constraints=None,
     if det:
         App.Console.PrintMessage("  Bestimmtheit: {}\n".format(det))
     if "include_translation_side" in meta or "include_side_terms" in meta:
-        trans = meta.get(
-            "include_translation_side", meta.get("include_side_terms"))
+        e_side = meta.get("include_distortion_energy", meta.get("include_side_terms"))
+        trans = meta.get("include_translation_side")
         App.Console.PrintMessage(
-            "  Winkelerhaltung E_angle in Optimierung: ja\n")
+            "  Winkelerhaltung E_angle in Optimierung: {}\n".format(
+                "ja" if e_side else "nein"))
         App.Console.PrintMessage(
             "  Schwerpunkt-Nebenbedingung in Optimierung: {}\n".format(
                 "ja" if trans else "nein"))
@@ -597,11 +595,11 @@ def _print_solver_diagnostics(meta=None, opt_info=None, constraints=None,
 
 def _calibration_residuals(
         params, specs, params0, z_vals, constraints=None, line_by_geo=None,
-        sketch=None, include_side_terms=True):
-    """Build full residual vector.
+        sketch=None, include_angle_energy=True, include_centroid=True):
+    """Build full residual vector for corner calibration (phase 3).
 
-    *include_side_terms* controls centroid translation only; E_angle is always
-    included with weight w_E (same as sketch angle constraints w_a).
+    *include_angle_energy* (rank < 6): append w·√E_angle.
+    Centroid translation Δt/τ_t is appended when *include_centroid* (default on).
     """
     H = hg._homography_from_xy_params(params, z_vals)
     length_res = np.asarray(_length_residuals_for_specs(specs, H), dtype=float)
@@ -619,8 +617,9 @@ def _calibration_residuals(
                 np.asarray(angle_res, dtype=float)
                 / _CALIB_ANGLE_TOLERANCE_RAD
                 * _CALIB_ANGLE_WEIGHT)
-    parts.append(_angle_energy_side_residuals(params, params0, z_vals))
-    if include_side_terms:
+    if include_angle_energy:
+        parts.append(_angle_energy_side_residuals(params, params0, z_vals))
+    if include_centroid:
         parts.append(rigid_part)
     return np.concatenate(parts)
 
@@ -1047,7 +1046,7 @@ def _solve_corner_calibration(
 
     # Phase 3 — full corner optimization
     params_start = params_curr
-    rank, n_primary, include_side = _primary_constraint_rank(
+    rank, n_primary, include_angle = _primary_constraint_rank(
         params0, specs, z_vals,
         constraints=constraints, line_by_geo=line_by_geo, sketch=sketch)
     n_angles = _count_angle_constraints(constraints, line_by_geo)
@@ -1055,7 +1054,7 @@ def _solve_corner_calibration(
     residual_fn = lambda params: _calibration_residuals(
         params, specs, params0, z_vals,
         constraints=constraints, line_by_geo=line_by_geo, sketch=sketch,
-        include_side_terms=include_side)
+        include_angle_energy=include_angle)
 
     result = least_squares(
         residual_fn,
@@ -1120,7 +1119,7 @@ def _solve_corner_calibration(
         "corner_move": move,
         **angle_meta,
         **_solver_diagnostics_meta(
-            rank, n_primary, include_side, "corners",
+            rank, n_primary, include_angle, "corners",
             n_lengths=len(specs), n_angles=n_angles),
     }
     if uniform_info is not None:

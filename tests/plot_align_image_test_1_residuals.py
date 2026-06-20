@@ -31,7 +31,8 @@ _CORNER_LABELS = cs._CORNER_ANGLE_LABELS
 
 
 def _decompose_residuals(
-        params, specs, params0, z_vals, include_translation,
+        params, specs, params0, z_vals,
+        include_angle_energy=False, include_centroid=False,
         constraints=None, line_by_geo=None, sketch=None):
     H = hg._homography_from_xy_params(params, z_vals)
     length_mm = np.asarray(
@@ -39,13 +40,17 @@ def _decompose_residuals(
     n = len(specs)
     length_scaled = length_mm / cs._CALIB_LENGTH_TOLERANCE_MM
     corner_e = cs._angle_preserving_energy_per_corner(params, params0, z_vals)
-    angle_sqrt = cs._angle_energy_side_residuals(params, params0, z_vals)
+    angle_sqrt = (
+        cs._angle_energy_side_residuals(params, params0, z_vals)
+        if include_angle_energy else
+        np.array([np.sqrt(max(E, 0.0)) for E in corner_e], dtype=float))
     rigid = cs._rigid_motion_stats(params, params0, z_vals)
     trans_scaled = rigid["translation_mm"] / cs._CALIB_RIGID_TRANSLATION_TOLERANCE_MM
     full = cs._calibration_residuals(
         params, specs, params0, z_vals,
         constraints=constraints, line_by_geo=line_by_geo, sketch=sketch,
-        include_side_terms=include_translation)
+        include_angle_energy=include_angle_energy,
+        include_centroid=include_centroid)
     return {
         "length_mm": length_mm,
         "length_scaled": length_scaled,
@@ -194,7 +199,7 @@ def _trace_uniform_scale(params0, z_vals, specs):
     """Production path: 1 length → analytic uniform scale (start + end)."""
     history = []
     dec0 = _decompose_residuals(
-        params0, specs, params0, z_vals, include_translation=False)
+        params0, specs, params0, z_vals)
     dec0["phase"] = "start"
     history.append(dec0)
 
@@ -206,7 +211,7 @@ def _trace_uniform_scale(params0, z_vals, specs):
     scale = float(spec["target"]) / current
     params1 = cs._uniform_scale_params(params0, scale)
     dec1 = _decompose_residuals(
-        params1, specs, params0, z_vals, include_translation=False)
+        params1, specs, params0, z_vals)
     dec1["phase"] = "uniform_scale"
     history.append(dec1)
     return history, scale
@@ -218,7 +223,7 @@ def _trace_uv_scale_phase(params0, z_vals, specs):
     def residual_fn(scales):
         params = cs._uv_scale_params(params0, scales[0], scales[1])
         dec = _decompose_residuals(
-            params, specs, params0, z_vals, include_translation=True)
+            params, specs, params0, z_vals)
         dec["phase"] = "uv_scale"
         history.append(dec)
         return cs._uv_scale_length_residuals(scales, specs, params0, z_vals)
@@ -237,21 +242,22 @@ def _trace_uv_scale_phase(params0, z_vals, specs):
 def _trace_corner_phase(
         params_start, params0, z_vals, specs,
         constraints=None, line_by_geo=None, sketch=None, phase_label="corners"):
-    rank, n_primary, include_translation = cs._primary_constraint_rank(
+    rank, n_primary, include_angle = cs._primary_constraint_rank(
         params0, specs, z_vals,
         constraints=constraints, line_by_geo=line_by_geo, sketch=sketch)
     history = []
 
     def residual_fn(params):
         dec = _decompose_residuals(
-            params, specs, params0, z_vals, include_translation,
+            params, specs, params0, z_vals,
+            include_angle_energy=include_angle, include_centroid=True,
             constraints=constraints, line_by_geo=line_by_geo, sketch=sketch)
         dec["phase"] = phase_label
         history.append(dec)
         return cs._calibration_residuals(
             params, specs, params0, z_vals,
             constraints=constraints, line_by_geo=line_by_geo, sketch=sketch,
-            include_side_terms=include_translation)
+            include_angle_energy=include_angle)
 
     result = least_squares(
         residual_fn,
@@ -260,7 +266,7 @@ def _trace_corner_phase(
         xtol=cs._CALIB_SOLVER_XTOL,
         gtol=cs._CALIB_SOLVER_GTOL,
         max_nfev=cs._CALIB_SOLVER_MAX_NFEV)
-    return result, history, rank, include_translation
+    return result, history, rank, include_angle
 
 
 def _merge_histories(*parts):
@@ -298,14 +304,14 @@ def plot_two_lengths_production(out_dir, params0, z_vals, specs, constraints):
     App.Console.PrintMessage("\n--- 2 Längen (Produktions-Solver) ---\n")
     history = []
     dec0 = _decompose_residuals(
-        params0, specs, params0, z_vals, include_translation=False)
+        params0, specs, params0, z_vals)
     dec0["phase"] = "start"
     history.append(dec0)
 
     params_curr = np.asarray(params0, dtype=float).copy()
     params_curr, _uni = cs._apply_uniform_scale_phase(specs, params_curr, z_vals)
     dec1 = _decompose_residuals(
-        params_curr, specs, params0, z_vals, include_translation=True)
+        params_curr, specs, params0, z_vals)
     dec1["phase"] = "uniform_scale"
     history.append(dec1)
 

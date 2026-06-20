@@ -83,8 +83,8 @@ Ausgangszustand \(\mathbf{p}_0\).
 
 **Effektive Freiheitsgrade:** 8 Eckparameter minus 2 durch die
 Schwerpunkt-Nebenbedingung (Abschnitt 6) → **6** relevante DOF für die
-Entscheidung, ob Nebenbedingungen (\(E_{\mathrm{angle}}\), Translation) in die
-Optimierung eingehen.
+Entscheidung, ob \(E_{\mathrm{angle}}\) in die Optimierung eingeht.
+\(\Delta t\) ist in Phase 3 (`corners`) immer im Residualvektor.
 
 Aus \(\mathbf{p}\) und den fixen Z-Werten werden die Ecken-Vektoren
 \(\mathbf{c}_0, \mathbf{c}_x, \mathbf{c}_1, \mathbf{c}_y \in \mathbb{R}^3\)
@@ -273,22 +273,21 @@ mit `scipy.optimize.least_squares` (Trust-Region-Reflective).
 
 ### 7.1 Zusammensetzung
 
-Primäre Restfehler (Längen, Winkel) sind immer enthalten. Die Winkelerhaltung
-\(E_{\mathrm{angle}}\) ist **immer** in \(\mathbf{r}\) (gewichtet wie die
-Winkel-Bedingungen, \(w = w_a = w_E\)). Die Schwerpunkt-Nebenbedingung
-\(\Delta t\) wird **nur bei Unterbestimmung** angehängt (Rang der primären
-Jacobian-Matrix \(< 6\)).
+Primäre Restfehler (Längen, Winkel) sind immer enthalten. Die Eck-Energien
+\(w\sqrt{E_{\mathrm{angle},k}}\) werden **nur bei Unterbestimmung** angehängt
+(Rang der primären Jacobian-Matrix \(< 6\)). Die Schwerpunkt-Strafe
+\(\Delta t / \tau_t\) ist in Phase 3 **immer** enthalten.
 
 \[
 \mathbf{r}(\mathbf{p}) =
 \begin{bmatrix}
 \mathbf{r}^{\mathrm{len}} / \tau_L \\
 w \cdot \mathbf{r}^{\mathrm{ang}} / \tau_a \\
-w \sqrt{E_{\mathrm{angle},c_0}(\mathbf{p})} \\
-w \sqrt{E_{\mathrm{angle},c_x}(\mathbf{p})} \\
-w \sqrt{E_{\mathrm{angle},c_1}(\mathbf{p})} \\
-w \sqrt{E_{\mathrm{angle},c_y}(\mathbf{p})} \\
-\mathbf{1}_{\mathrm{rank} < 6}\,\Delta t / \tau_t
+\mathbf{1}_{\mathrm{rank} < 6}\,w \sqrt{E_{\mathrm{angle},c_0}(\mathbf{p})} \\
+\mathbf{1}_{\mathrm{rank} < 6}\,w \sqrt{E_{\mathrm{angle},c_x}(\mathbf{p})} \\
+\mathbf{1}_{\mathrm{rank} < 6}\,w \sqrt{E_{\mathrm{angle},c_1}(\mathbf{p})} \\
+\mathbf{1}_{\mathrm{rank} < 6}\,w \sqrt{E_{\mathrm{angle},c_y}(\mathbf{p})} \\
+\Delta t / \tau_t
 \end{bmatrix}.
 \]
 
@@ -298,7 +297,8 @@ gebildet (\(\mathbf{r}^{\mathrm{prim}}\) = Längen- und Winkel-Restfehler ohne
 Skalierung). Der Rang wird per SVD mit Toleranz
 \(\max(10^{-10},\,10^{-8}\,\sigma_1)\) bestimmt. Bei \(\mathrm{rank} \geq 6\)
 (gelöst oder überbestimmt in den **6 effektiven** Freiheitsgraden) entfällt
-nur \(\Delta t\) in der Optimierung; \(E_{\mathrm{angle}}\) bleibt aktiv.
+\(E_{\mathrm{angle}}\) in der Optimierung; \(\Delta t\) bleibt aktiv. Alle
+Werte werden weiterhin im Report ausgewiesen.
 
 | Symbol | Wert (Code) | Bedeutung |
 |--------|-------------|-----------|
@@ -410,7 +410,7 @@ Bei **Winkel-Bedingungen** laufen alle drei Phasen; Early-Exit nach Phase 1/2 en
 | 2 Soll-Längen, keine Winkel | Kaskade 1D→2D; Abbruch in Phase 2 wenn exakt (`uv_scale`), sonst Phase 3 |
 | 1 Länge + Winkel (z. B. horizontal) | `corners`, `least_squares`; Winkel gewichtet; \(E_{\mathrm{angle}}\) und \(\Delta t\) als Tie-Breaker |
 | 2 Längen + Winkel | `corners` ab Ausgang (kein UV-Warmstart) |
-| Viele Längen + Winkel (überbestimmt) | Längen- und Winkel-Terme dominieren; \(\Delta t\) entfällt bei Rang \(\geq 6\); \(E_{\mathrm{angle}}\) bleibt aktiv |
+| Viele Längen + Winkel (überbestimmt) | Längen- und Winkel-Terme dominieren; \(E_{\mathrm{angle}}\) und \(\Delta t\) entfallen bei Rang \(\geq 6\) |
 
 Bei **unterbestimmten** Systemen ohne UV-Warmstart bestimmen
 \(\sqrt{E_{\mathrm{angle},k}}\) und \(\Delta t\) die Lösung unter den

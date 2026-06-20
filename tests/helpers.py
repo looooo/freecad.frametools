@@ -178,6 +178,7 @@ def solve_corners(corners, specs, constraints=None, line_meta=None, sketch=None)
         "effective_dof": meta.get("effective_dof"),
         "include_side_terms": meta.get("include_side_terms"),
         "include_distortion_energy": meta.get("include_distortion_energy"),
+        "include_translation_side": meta.get("include_translation_side"),
         "determinacy": meta.get("determinacy"),
         "uv_scale_warm_start": meta.get("uv_scale_warm_start"),
         "scale_sx": meta.get("scale_sx"),

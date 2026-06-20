@@ -638,7 +638,7 @@ class TestConstraintRemapping(unittest.TestCase):
 
 
 class TestDistortionEnergyGating(unittest.TestCase):
-    """E_angle always in residuals; centroid translation only if rank < 6."""
+    """E_angle in residuals only when primary Jacobian rank < 6; Δt always in corners."""
 
     def test_two_lengths_underdetermined_includes_e(self):
         corners = h.corners_rectangle(100.0, 100.0)
@@ -668,8 +668,8 @@ class TestDistortionEnergyGating(unittest.TestCase):
         self.assertTrue(report["include_distortion_energy"])
         self.assertEqual(report["determinacy"], "unterbestimmt")
 
-    def test_many_length_constraints_may_exclude_translation(self):
-        """Eight length specs can reach full rank → only Δt omitted."""
+    def test_many_length_constraints_may_exclude_side_terms(self):
+        """Eight length specs can reach full rank → E_angle omitted, Δt kept."""
         from freecad.frametools import image_constraint_solver as cs
 
         corners = h.corners_rectangle(120.0, 90.0)
@@ -687,15 +687,20 @@ class TestDistortionEnergyGating(unittest.TestCase):
         specs = [h.length_spec(line, h.length_mm(H0, line)) for line in lines]
         params0 = image_tools._pack_corners_xy(corners)
         z_vals = image_tools._corner_z_values(corners)
-        rank, n_primary, include_trans = image_tools._primary_constraint_rank(
-            params0, specs, z_vals, line_by_geo=h.line_by_geo(*lines))
+        line_by_geo = h.line_by_geo(*lines)
+        rank, n_primary, include_angle = image_tools._primary_constraint_rank(
+            params0, specs, z_vals, line_by_geo=line_by_geo)
         self.assertEqual(n_primary, 8)
-        self.assertTrue(
-            cs._angle_energy_side_residuals(params0, params0, z_vals).size)
         if rank >= 6:
-            self.assertFalse(include_trans)
+            self.assertFalse(include_angle)
         else:
-            self.assertTrue(include_trans)
+            self.assertTrue(include_angle)
+        r_with = cs._calibration_residuals(
+            params0, specs, params0, z_vals, include_angle_energy=include_angle)
+        r_no_trans = cs._calibration_residuals(
+            params0, specs, params0, z_vals,
+            include_angle_energy=include_angle, include_centroid=False)
+        self.assertEqual(len(r_with), len(r_no_trans) + 1)
 
 
 if __name__ == "__main__":
