@@ -92,3 +92,4 @@ Stabile API im Core; Commands bleiben dünn.
 | Dokumentation | diese Datei |
 | Implementierung | ** zurückgestellt** |
 | Frame-Workbench | unverändert Test-/Dev-Umgebung |
+| GUI-Konsistenz | [IMAGE_PIPELINE_SPEC.md §16](IMAGE_PIPELINE_SPEC.md#16-gui--soll-neuimplementierung) — Task Panel, ein Hub, weniger Toolbar |

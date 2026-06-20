@@ -34,6 +34,7 @@ statt Monolith-Workbench; Frame-Workbench bleibt Dev/Test.
 13. [Konstanten und Parameter](#13-konstanten-und-parameter)
 14. [Tests und Validierung](#14-tests-und-validierung)
 15. [Implementierungs-Roadmap](#15-implementierungs-roadmap)
+16. [GUI — Soll (Neuimplementierung)](#16-gui--soll-neuimplementierung)
 
 ---
 
@@ -649,7 +650,8 @@ Kaltstart; CSV/PNG unter `tests/output/`.
 1. `image_coords.py` — H, UV, Welding
 2. `image_solver.py` — einheitliche Parametrisierung + Warm-Start
 3. Tests portieren / vereinfachen
-4. `ImageCalibration`-Workflow anbinden
+4. **Task Panel + Hub** (`ImageCalibration`) — [§16](#16-gui--soll-neuimplementierung)
+5. `ImageCalibration`-Workflow anbinden; Toolbar schlanken
 
 ### Phase B — Kameramodell
 
@@ -662,6 +664,123 @@ Kaltstart; CSV/PNG unter `tests/output/`.
 
 9. Legacy Scale Solver als Wrapper
 10. Doku in diesem File pflegen; alte Einzeldokumente archivieren
+
+---
+
+## 16. GUI — Soll (Neuimplementierung)
+
+**Vorgemerkt** — bei Neuimplementierung neben Solver und Micro-Apps. Ziel: **weniger
+aufwendig, konsistenter, weniger fehleranfällig** als der heutige Mix aus vielen
+Toolbar-Befehlen, Konsole und mehreren Dialogen.
+
+### 16.1 Ist-Zustand (kurz)
+
+| Aspekt | Heute | Risiko |
+|--------|-------|--------|
+| Einstieg | viele gleichwertige Toolbar-Buttons | Nutzer überspringt Schritte |
+| Feedback | viel `App.Console.PrintMessage/Error` | Fehler leicht übersehen |
+| Auswahl | implizite Regeln (was muss selektiert sein) | Konsole-Warnung statt UI-Blockade |
+| Kalibrierung | mehrere Befehle + großer Constraints-Dialog | mächtig, aber komplex |
+| Overlay / Feature-Pair | eigene Klick-Modi | OK, aber anderer Stil als Calibration |
+
+Die jetzige GUI ist **brauchbar** (Constraints-Dialog, Sketch-Anbindung), aber **nicht
+einheitlich geführt** — Erfolg hängt vom Kenntnisstand des Workflows ab.
+
+### 16.2 Leitprinzipien
+
+1. **Ein Hub-Objekt:** `ImageCalibration` (oder Nachfolger) ist **einziger** Einstieg
+   für den metrischen Workflow — nicht sieben lose Befehle.
+2. **Geführter Ablauf:** linearer **Task Panel**-Wizard statt freier Toolbar-Reihenfolge.
+3. **Weniger modale Dialoge:** Einstellungen im Task Panel; modale Dialoge nur für
+   kurze Eingaben (eine Zahl, Datei wählen).
+4. **Validierung vor Aktion:** Buttons deaktiviert + kurzer Hinweis **im Panel**, nicht
+   erst Fehler in der Konsole nach Klick.
+5. **Konsole = Diagnose:** Solver-Details optional („Details anzeigen“), Standard-UI
+   zeigt **3–5 Zeilen Status** (exakt ja/nein, max. Längenfehler, Phase).
+6. **Gleiche Interaktionsmuster:** Punkt wählen immer gleich (Cursor-Hinweis, Escape,
+   Rechtsklick = fertig); keine Sonderfälle pro Befehl.
+7. **Weniger ist mehr:** Advanced-Funktionen (Overlay, Feature-Pair) **hinter**
+   „Experte“ oder separate Micro-App — nicht im Haupt-Wizard.
+
+### 16.3 Vorgeschlagener Workflow (UI)
+
+```text
+[Image Calibration anlegen]  ← ein Toolbar-Button (+ optional „Bild laden“)
+        │
+        ▼
+Task Panel — Schritte (Checkbox / grün wenn erledigt):
+  1. Bild verknüpfen          (AlignedImage / Datei)
+  2. Sketch öffnen              (Kanten zeichnen)
+  3. Bedingungen                (Längen + Winkel, kompakt)
+  4. Vorschau / Ausrichtung     (optional, vor Solve)
+  5. Kalibrieren                (ein Button)
+  6. Ergebnis                   (Kurzbericht + „Sketch übernehmen“)
+```
+
+**Toolbar Image (schlank):**
+
+| Button | Rolle |
+|--------|--------|
+| **Kalibrierung starten** | erzeugt Hub + Task Panel |
+| **Overlay** (optional) | Experte / zweites Bild ausrichten |
+| *(später)* Kameramodell | siehe [CAMERA_MODEL.md](CAMERA_MODEL.md) |
+
+Referenzlinien, Constraints, Solve **nicht** als drei getrennte Toolbar-Befehle —
+alles im Task Panel des Hub-Objekts (Doppelklick / „Bearbeiten“).
+
+### 16.4 Task Panel statt großem Dialog
+
+**Bedingungen (Schritt 3)** — vereinfacht gegenüber `ImageCalibrationConstraintsDialog`:
+
+- Tabelle: Typ | Kante | Wert — bleibt
+- **Kein** paralleler „Overlay“-State im selben Dialog
+- Live-Validierung: unbekannte Kante → Zeile rot, Solve gesperrt
+- Presets: „nur Längen“, „+ horizontal“, … für typische Fälle
+
+**Ergebnis (Schritt 6):**
+
+- Ampel: grün = exakt, gelb = Ausgleich, rot = fehlgeschlagen
+- Eine Zeile pro Soll-Länge: Ist | Soll | Δ
+- Link „Diagnose in Konsole“ für `_print_calibration_constraint_report`
+
+### 16.5 Fehler vermeiden (konkret)
+
+| Problem heute | Soll |
+|---------------|------|
+| Falsche Auswahl → Konsole | Panel: „Bitte ImageCalibration auswählen“ + Button inaktiv |
+| Sketch ohne Linien | Schritt 2 nicht abhaken, Solve disabled |
+| Unterbestimmt ohne Hinweis | Panel: „Rang 2/6 — Ergebnis nicht eindeutig“ vor Solve |
+| Workbench-Wechsel nach Sketch | explizit „Zurück zur Kalibrierung“ im Panel, kein Magic |
+| Mehrere Bilder in Auswahl | Dropdown im Hub, nicht Heuristik |
+
+### 16.6 Technische Umsetzung (FreeCAD)
+
+- **Qt Task Panel:** `Gui.Control.showDialog()` mit `getStandardButtons()` —
+  wie FreeCAD-PartDesign-Tasks, nicht lose `.ui`-Popups.
+- **Ein Modul** `fc/task_calibration.py` — UI-Logik getrennt von Solver (`core/`).
+- **State Machine:** `enum Step { Image, Sketch, Constraints, Solve, Done }` am
+  Hub-Proxy; Task Panel liest/schreibt nur diesen State.
+- **Kein globaler Dialog-Singleton** (heute `_active_constraints_dialog`) —
+  Panel an `ViewObject` / Objekt-Lifecycle koppeln.
+- **Icons / Texte** zentral in `fc/resources.py` oder Manifest (Micro-App).
+
+### 16.7 Bewusst nicht
+
+- Kein eigener „Mini-Sketcher“ im Dialog
+- Keine doppelte Pflege Toolbar + Panel (Panel ist führend)
+- Keine Pflicht-Konsole für normale Nutzer
+- Kein UI-Builder-Proliferation (wenige `.ui`-Files, mehr programmatic Qt im Task)
+
+### 16.8 Roadmap-Ergänzung
+
+Parallel zu Phase A (Kern neu):
+
+- Task Panel + Hub-State Machine (Mock ohne Solver)
+- Solver anbinden, Constraints-Tabelle portieren (vereinfacht)
+- Toolbar auf 1–2 Image-Buttons reduzieren
+- Konsole-Diagnose hinter „Experte“
+
+Siehe auch [MICROAPPS.md](MICROAPPS.md) — Image-Micro-App liefert **eine** GUI-Schale.
 
 ---
 
