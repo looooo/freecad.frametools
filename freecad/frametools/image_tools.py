@@ -57,6 +57,7 @@ _axis_alignment_sin = cs._axis_alignment_sin
 _constraints_need_geo_remap = cs._constraints_need_geo_remap
 _constraint_line_index = cs._constraint_line_index
 _constraint_line_pair = cs._constraint_line_pair
+_constraint_point_index = cs._constraint_point_index
 _reference_image_from_selection = pa._reference_image_from_selection
 
 _REF_LINE_ENDPOINT_SNAP_MM = cs.REF_LINE_ENDPOINT_SNAP_MM
@@ -637,6 +638,178 @@ def _store_calibration_lines(cal_obj, lines_meta):
             "v1": float(line["v1"]),
         })
     cal_obj.Lines = image_calibration_objects.dump_lines(payload)
+
+
+def _point_label(point_index, pt=None):
+    if pt is not None:
+        label = pt.get("label")
+        if label:
+            return str(label)
+    return "V{}".format(int(point_index))
+
+
+def _iter_sketch_vertex_points_local(sketch):
+    """Sketch-local points in FreeCAD wire/edge topology order."""
+    shape = getattr(sketch, "Shape", None)
+    if shape is None or shape.isNull():
+        return
+    wires = list(getattr(shape, "Wires", None) or [])
+    if wires:
+        for wire in wires:
+            for vertex in wire.Vertexes:
+                yield App.Vector(vertex.Point)
+        return
+    edges = list(getattr(shape, "Edges", None) or [])
+    if edges:
+        for edge in edges:
+            for vertex in edge.Vertexes:
+                yield App.Vector(vertex.Point)
+        return
+    for vertex in shape.Vertexes:
+        yield App.Vector(vertex.Point)
+
+
+def _append_point_cluster(clusters, w, u, v, tol_mm):
+    w = App.Vector(w)
+    for cluster in clusters:
+        cw = cluster.get("w")
+        if cw is not None and cw.distanceToPoint(w) <= tol_mm:
+            return
+    clusters.append({
+        "u": float(u),
+        "v": float(v),
+        "w": w,
+    })
+
+
+def _points_meta_from_sketch(sketch, img, tol_mm=None):
+    """Sketch nodes V0, V1, … in FreeCAD wire/edge vertex order."""
+    if tol_mm is None:
+        tol_mm = _REF_LINE_ENDPOINT_SNAP_MM
+    if sketch is None or img is None:
+        return []
+    clusters = []
+    for local_pt in _iter_sketch_vertex_points_local(sketch):
+        w = _sketch_world_point(sketch, local_pt)
+        u, v = pa._uv_on_image(w, img)
+        _append_point_cluster(clusters, w, u, v, tol_mm)
+    if not clusters:
+        lines_meta, _ = _snapshot_sketch_lines_uv(sketch, img, tol_mm)
+        return _points_meta_from_lines_meta(lines_meta)
+    points = []
+    for i, cluster in enumerate(clusters):
+        points.append({
+            "point": i,
+            "u": cluster["u"],
+            "v": cluster["v"],
+            "w": cluster["w"],
+            "label": _point_label(i),
+        })
+    return points
+
+
+def _points_meta_from_lines_meta(lines_meta):
+    """Fallback nodes V0, V1, … when Shape has no wire/edge vertices yet.
+
+    Order: L0 start/end, L1 start/end, … (geometry index, StartPoint then EndPoint).
+    """
+    if not lines_meta:
+        return []
+    clusters = []
+    for line in lines_meta:
+        for u, v, w in (
+                (line["u0"], line["v0"], line.get("w0")),
+                (line["u1"], line["v1"], line.get("w1"))):
+            u = float(u)
+            v = float(v)
+            merged = False
+            for cluster in clusters:
+                if (abs(cluster["u"] - u) <= 1e-8
+                        and abs(cluster["v"] - v) <= 1e-8):
+                    if w is not None:
+                        cluster["w"] = App.Vector(w)
+                    merged = True
+                    break
+            if not merged:
+                clusters.append({
+                    "u": u,
+                    "v": v,
+                    "w": App.Vector(w) if w is not None else None,
+                })
+    points = []
+    for i, cluster in enumerate(clusters):
+        points.append({
+            "point": i,
+            "u": cluster["u"],
+            "v": cluster["v"],
+            "w": cluster["w"],
+            "label": _point_label(i),
+        })
+    return points
+
+
+def _store_calibration_points(cal_obj, points_meta):
+    image_calibration_objects.ensure_image_calibration(cal_obj)
+    payload = []
+    for i, pt in enumerate(points_meta):
+        payload.append({
+            "point": int(pt.get("point", i)),
+            "u": float(pt["u"]),
+            "v": float(pt["v"]),
+        })
+    cal_obj.Points = image_calibration_objects.dump_points(payload)
+
+
+def _points_uv_differs_from_stored(fresh, stored, tol=1e-4):
+    if len(fresh) != len(stored):
+        return True
+    for a, b in zip(fresh, stored):
+        for key in ("u", "v"):
+            if abs(float(a[key]) - float(b[key])) > tol:
+                return True
+    return False
+
+
+def _calibration_image_for_points(cal_obj):
+    """Image for point UV snapshots (aligned reset when available)."""
+    source = _source_image_for_calibration(cal_obj)
+    if not _calibration_image_is_valid(source):
+        return None
+    aligned = pa.find_aligned_image_for_source(source)
+    if aligned is not None:
+        pa._reset_aligned_from_source(aligned, source)
+        return aligned
+    return source
+
+
+def _points_meta_for_calibration(cal_obj, sketch, img, lines_meta=None):
+    """Parametric point anchors (UV) from sketch vertex order."""
+    if lines_meta is None:
+        lines_meta, _ = _lines_meta_for_calibration(cal_obj, sketch, img)
+    fresh = _points_meta_from_sketch(sketch, img)
+    if not fresh:
+        fresh = _points_meta_from_lines_meta(lines_meta)
+    if not fresh:
+        return [], lines_meta
+
+    stored = image_calibration_objects.parse_points(
+        getattr(cal_obj, "Points", ""))
+    if not stored or len(stored) != len(fresh):
+        return fresh, lines_meta
+    if _points_uv_differs_from_stored(fresh, stored):
+        return fresh, lines_meta
+
+    merged = []
+    for i, pt in enumerate(fresh):
+        s = stored[i]
+        merged.append({
+            "point": i,
+            "u": float(s["u"]),
+            "v": float(s["v"]),
+            "w": pt.get("w"),
+            "label": pt.get("label", _point_label(i)),
+        })
+    return merged, lines_meta
 def _sketch_uv_differs_from_stored(fresh, stored, tol=1e-4):
     if len(fresh) != len(stored):
         return True
@@ -837,7 +1010,7 @@ def create_sketch_on_image(img, doc=None):
     sketch = doc.addObject(
         "Sketcher::SketchObject",
         doc.getUniqueObjectName("CalibSketch"))
-    sketch.Placement = _sketch_placement_from_image(img)
+    sketch.Placement = App.Placement()
     return sketch
 _FRAME_WORKBENCH = "FrameWorkbench"
 _calib_sketch_edit_observer = None
@@ -945,6 +1118,7 @@ def _axis_sketch_for_calibration(cal_obj):
 
 
 def solve_image_calibration(cal_obj):
+    image_calibration_objects.ensure_image_calibration(cal_obj)
     source_img = _image_for_calibration(cal_obj)
     if not _calibration_image_is_valid(source_img):
         App.Console.PrintError(
@@ -976,6 +1150,10 @@ def solve_image_calibration(cal_obj):
         return
 
     line_by_geo = cs._line_by_index_from_lines_meta(lines_meta)
+    points_meta, lines_meta = _points_meta_for_calibration(
+        cal_obj, original_sketch, aligned, lines_meta=lines_meta)
+    point_by_index = cs._point_by_index_from_points_meta(points_meta)
+    _store_calibration_points(cal_obj, points_meta)
     length_specs = cs._length_specs_from_constraints(constraints, line_by_geo)
     if not length_specs:
         App.Console.PrintError(
@@ -1011,7 +1189,8 @@ def solve_image_calibration(cal_obj):
     try:
         corners_new, H_new, opt_info, meta = compute_calibration_from_specs(
             length_specs, aligned, constraints=constraints,
-            line_by_geo=line_by_geo, sketch=axis_sketch)
+            line_by_geo=line_by_geo, point_by_index=point_by_index,
+            sketch=axis_sketch)
 
         if welds:
             App.Console.PrintMessage(
@@ -1112,14 +1291,14 @@ def draw_calibration_sketch():
     App.Console.PrintError(
         "ImageCalibration oder Bild für neue Kalibrierung auswählen.\n")
 class _CalibrationSketchLabelsOverlay(object):
-    """L0, L1, … labels at sketch lines (fixed screen size)."""
+    """L0, L1, … and V0, V1, … labels on sketch geometry."""
 
     FONT_PIXELS = 56
     OFFSET_MM = 10.0
     TEXT_SCALE = 0.55
     _active = None
 
-    def __init__(self, sketch):
+    def __init__(self, sketch, points_meta=None):
         from pivy import coin
 
         if sketch is None or Gui is None:
@@ -1157,6 +1336,14 @@ class _CalibrationSketchLabelsOverlay(object):
             pos = mid + perp * self.OFFSET_MM
             self.labels_sep.addChild(
                 self._make_label_node(pos, "L{}".format(line_idx)))
+
+        for pt in points_meta or []:
+            w = pt.get("w")
+            if w is None:
+                continue
+            self.labels_sep.addChild(
+                self._make_label_node(
+                    App.Vector(w), _point_label(pt.get("point", 0), pt)))
 
         self._register_view_callbacks()
         self._start_scale_timer()
@@ -1360,6 +1547,7 @@ class ImageCalibrationConstraintsDialog(object):
         self._building = False
         self._label_overlay = None
         self._refresh_sketch_lines()
+        self._refresh_sketch_points()
         raw_constraints = image_calibration_objects.parse_constraints(
             cal_obj.Constraints)
         self.constraints = cs._remap_constraints_to_sketch(
@@ -1374,19 +1562,21 @@ class ImageCalibrationConstraintsDialog(object):
         layout = QtGui.QVBoxLayout(self.form)
 
         hint = QtGui.QLabel(
-            "Parametrisch: Kanten L0, L1, … und Bedingungen am Objekt "
-            "gespeichert. Minimale Bedingungen setzen, „Kalibrieren“, Ergebnis "
-            "prüfen, weitere Bedingungen ergänzen, erneut kalibrieren.\n"
+            "Parametrisch: Kanten L0, L1, … und Knoten V0, V1, … (FreeCAD-"
+            "Sketch-Vertex-Reihenfolge) am Objekt gespeichert. Minimale "
+            "Bedingungen setzen, „Kalibrieren“, Ergebnis prüfen, weitere "
+            "Bedingungen ergänzen, erneut kalibrieren.\n"
             "Horizontal / Senkrecht: Kante parallel zur festen Sketch-Achse "
             "(Sketch-X bzw. Sketch-Y) — nur das Bild wird verzerrt, die "
             "Sketch-Platzierung bleibt unverändert; nach dem Solve werden "
-            "nur die Linien-Endpunkte neu gesetzt.")
+            "nur die Linien-Endpunkte neu gesetzt.\n"
+            "Fixer Punkt: Knoten Vk soll an Soll-X/Y (Welt-mm) liegen. "
+            "Bei gesetzten Fixpunkten entfällt die Schwerpunkt-Nebenbedingung.")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        self.table = QtGui.QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(
-            ["Typ", "Kante", "Kante B / Wert"])
+        self.table = QtGui.QTableWidget(0, 4)
+        self.table.horizontalHeader().hide()
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(
             QtGui.QAbstractItemView.SelectRows)
@@ -1395,15 +1585,18 @@ class ImageCalibrationConstraintsDialog(object):
         self.table.setEditTriggers(
             QtGui.QAbstractItemView.NoEditTriggers)
         self.table.setColumnWidth(0, 100)
-        self.table.setColumnWidth(1, 160)
+        self.table.setColumnWidth(1, 140)
+        self.table.setColumnWidth(2, 120)
         layout.addWidget(self.table)
 
         btn_row = QtGui.QHBoxLayout()
         for label, handler in (
                 ("Soll-Länge", self._add_length_row),
                 ("Parallel", self._add_parallel_row),
+                ("Rechtwinklig", self._add_rechtwinklig_row),
                 ("Horizontal", self._add_horizontal_row),
-                ("Senkrecht", self._add_senkrecht_row)):
+                ("Senkrecht", self._add_senkrecht_row),
+                ("Fixer Punkt", self._add_fixed_point_row)):
             btn = QtGui.QPushButton(label)
             btn.clicked.connect(handler)
             btn_row.addWidget(btn)
@@ -1419,7 +1612,7 @@ class ImageCalibrationConstraintsDialog(object):
         if self.sketch is not None:
             try:
                 self._label_overlay = _CalibrationSketchLabelsOverlay(
-                    self.sketch)
+                    self.sketch, self.points)
             except Exception as exc:
                 App.Console.PrintWarning(
                     "Sketch-Beschriftung fehlgeschlagen: {}\n".format(exc))
@@ -1446,6 +1639,15 @@ class ImageCalibrationConstraintsDialog(object):
                         line_idx,
                         seg.StartPoint.distanceToPoint(seg.EndPoint)),
                 })
+
+    def _refresh_sketch_points(self):
+        self.points = []
+        if self.sketch is None:
+            return
+        img = _calibration_image_for_points(self.cal_obj)
+        if not _calibration_image_is_valid(img):
+            return
+        self.points = _points_meta_from_sketch(self.sketch, img)
 
     def _on_form_destroyed(self, *args):
         global _active_constraints_dialog
@@ -1511,6 +1713,52 @@ class ImageCalibrationConstraintsDialog(object):
             return None
         return int(data)
 
+    def _point_combo(self, point_idx=None):
+        combo = QtGui.QComboBox(self.table)
+        role = QtCore.Qt.UserRole
+        for pt in self.points:
+            combo.addItem(_point_label(pt["point"], pt))
+            combo.setItemData(
+                combo.count() - 1, int(pt["point"]), role)
+        if point_idx is not None:
+            point_idx = int(point_idx)
+            idx = combo.findData(point_idx, role)
+            if idx < 0:
+                for i in range(combo.count()):
+                    if int(combo.itemData(i, role)) == point_idx:
+                        idx = i
+                        break
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            elif combo.count() > 0:
+                combo.setCurrentIndex(0)
+        combo.setMinimumContentsLength(10)
+        try:
+            combo.setSizeAdjustPolicy(
+                QtGui.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        except Exception:
+            pass
+        return combo
+
+    def _combo_point(self, combo):
+        if combo is None:
+            return None
+        idx = combo.currentIndex()
+        if idx < 0:
+            return None
+        data = combo.itemData(idx, QtCore.Qt.UserRole)
+        if data is None:
+            return None
+        return int(data)
+
+    def _world_xy_for_point(self, point_idx):
+        for pt in self.points:
+            if int(pt.get("point", -1)) == int(point_idx):
+                w = pt.get("w")
+                if w is not None:
+                    return float(w.x), float(w.y)
+        return 0.0, 0.0
+
     def _length_spin(self, value=None):
         spin = QtGui.QDoubleSpinBox()
         spin.setRange(0.0, 1e9)
@@ -1522,6 +1770,18 @@ class ImageCalibrationConstraintsDialog(object):
 
     def _spin_value(self, spin):
         return float(spin.value())
+
+    def _coord_spin(self, value=None):
+        spin = QtGui.QDoubleSpinBox()
+        spin.setRange(-1e9, 1e9)
+        spin.setDecimals(3)
+        spin.setSuffix(" mm")
+        if value is not None:
+            spin.setValue(value)
+        return spin
+
+    def _set_dash_cell(self, row, col):
+        self.table.setItem(row, col, QtGui.QTableWidgetItem("—"))
 
     def _load_constraints(self):
         self._building = True
@@ -1542,17 +1802,28 @@ class ImageCalibrationConstraintsDialog(object):
         for item in self.constraints.get("vertical", []):
             self._add_row(
                 "Senkrecht", line_a=_constraint_line_index(item))
+        for item in self.constraints.get("fixed_points", []):
+            self._add_row(
+                "Fixer Punkt",
+                point_idx=_constraint_point_index(item),
+                x_mm=float(item["target_x_mm"]),
+                y_mm=float(item["target_y_mm"]))
         self._building = False
 
     _SINGLE_EDGE_KINDS = ("Horizontal", "Senkrecht")
 
     def _add_row(self, kind, line_a=None, geo_a=None, line_b=None, geo_b=None,
-                 target_mm=None):
+                 target_mm=None, point_idx=None, x_mm=None, y_mm=None):
         if line_a is None:
             line_a = geo_a
         if line_b is None:
             line_b = geo_b
-        if line_a is None and not self._building and self.lines:
+        if kind == "Fixer Punkt":
+            if point_idx is None and not self._building and self.points:
+                point_idx = self.points[0]["point"]
+            if x_mm is None and y_mm is None and point_idx is not None:
+                x_mm, y_mm = self._world_xy_for_point(point_idx)
+        elif line_a is None and not self._building and self.lines:
             line_a = self.lines[0]["line"]
         if kind == "Soll-Länge":
             if target_mm is None and self.sketch is not None and line_a is not None:
@@ -1569,13 +1840,21 @@ class ImageCalibrationConstraintsDialog(object):
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.table.setItem(row, 0, QtGui.QTableWidgetItem(kind))
-        self.table.setCellWidget(row, 1, self._geo_combo(line_a))
-        if kind == "Soll-Länge":
-            self.table.setCellWidget(row, 2, self._length_spin(target_mm))
-        elif kind in self._SINGLE_EDGE_KINDS:
-            self.table.setItem(row, 2, QtGui.QTableWidgetItem("—"))
+        if kind == "Fixer Punkt":
+            self.table.setCellWidget(row, 1, self._point_combo(point_idx))
+            self.table.setCellWidget(row, 2, self._coord_spin(x_mm))
+            self.table.setCellWidget(row, 3, self._coord_spin(y_mm))
         else:
-            self.table.setCellWidget(row, 2, self._geo_combo(line_b))
+            self.table.setCellWidget(row, 1, self._geo_combo(line_a))
+            if kind == "Soll-Länge":
+                self.table.setCellWidget(row, 2, self._length_spin(target_mm))
+                self._set_dash_cell(row, 3)
+            elif kind in self._SINGLE_EDGE_KINDS:
+                self._set_dash_cell(row, 2)
+                self._set_dash_cell(row, 3)
+            else:
+                self.table.setCellWidget(row, 2, self._geo_combo(line_b))
+                self._set_dash_cell(row, 3)
 
     def _add_length_row(self, geo=None, target_mm=None):
         self._add_row("Soll-Länge", line_a=geo, target_mm=target_mm)
@@ -1583,11 +1862,22 @@ class ImageCalibrationConstraintsDialog(object):
     def _add_parallel_row(self, geo_a=None, geo_b=None):
         self._add_row("Parallel", line_a=geo_a, line_b=geo_b)
 
+    def _add_rechtwinklig_row(self, geo_a=None, geo_b=None):
+        self._add_row("Rechtwinklig", line_a=geo_a, line_b=geo_b)
+
     def _add_senkrecht_row(self, geo=None):
         self._add_row("Senkrecht", line_a=geo)
 
     def _add_horizontal_row(self, geo=None):
         self._add_row("Horizontal", line_a=geo)
+
+    def _add_fixed_point_row(self, point_idx=None, x_mm=None, y_mm=None):
+        if not self.points:
+            App.Console.PrintMessage(
+                "Keine Sketch-Knoten — zuerst Linien im Sketch zeichnen.\n")
+            return
+        self._add_row(
+            "Fixer Punkt", point_idx=point_idx, x_mm=x_mm, y_mm=y_mm)
 
     def _remove_row(self):
         row = self.table.currentRow()
@@ -1603,6 +1893,23 @@ class ImageCalibrationConstraintsDialog(object):
             if kind_item is None:
                 continue
             kind = kind_item.text()
+            if kind == "Fixer Punkt":
+                combo_pt = self.table.cellWidget(row, 1)
+                pi = self._combo_point(combo_pt)
+                if pi is None:
+                    App.Console.PrintWarning(
+                        "Fixpunkt-Zeile übersprungen: ungültiger Knoten.\n")
+                    continue
+                spin_x = self.table.cellWidget(row, 2)
+                spin_y = self.table.cellWidget(row, 3)
+                if spin_x is None or spin_y is None:
+                    continue
+                constraints["fixed_points"].append({
+                    "point": pi,
+                    "target_x_mm": self._spin_value(spin_x),
+                    "target_y_mm": self._spin_value(spin_y),
+                })
+                continue
             combo_a = self.table.cellWidget(row, 1)
             la = self._combo_geo(combo_a)
             if la is None:
@@ -1652,9 +1959,14 @@ class ImageCalibrationConstraintsDialog(object):
         lines_meta, _ = _snapshot_sketch_lines_uv(sketch, aligned)
         if lines_meta:
             _store_calibration_lines(self.cal_obj, lines_meta)
+            points_meta = _points_meta_from_sketch(sketch, aligned)
+            if not points_meta:
+                points_meta = _points_meta_from_lines_meta(lines_meta)
+            _store_calibration_points(self.cal_obj, points_meta)
 
     def _refresh_after_solve(self):
         self._refresh_sketch_lines()
+        self._refresh_sketch_points()
         self.constraints = image_calibration_objects.parse_constraints(
             self.cal_obj.Constraints)
         self.table.setRowCount(0)
@@ -1664,7 +1976,7 @@ class ImageCalibrationConstraintsDialog(object):
         if self.sketch is not None:
             try:
                 self._label_overlay = _CalibrationSketchLabelsOverlay(
-                    self.sketch)
+                    self.sketch, self.points)
             except Exception as exc:
                 App.Console.PrintWarning(
                     "Sketch-Beschriftung fehlgeschlagen: {}\n".format(exc))
@@ -1703,6 +2015,7 @@ def show_calibration_constraints_dialog(cal_obj):
     if not image_calibration_objects.is_image_calibration(cal_obj):
         App.Console.PrintError("Kein ImageCalibration-Objekt.\n")
         return
+    image_calibration_objects.ensure_image_calibration(cal_obj)
     ImageCalibrationConstraintsDialog(cal_obj)
 def show_calibration_constraints_for_selection():
     sel = Gui.Selection.getSelection() if Gui else []

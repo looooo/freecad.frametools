@@ -83,7 +83,8 @@ Ausgangszustand \(\mathbf{p}_0\).
 **Effektive Freiheitsgrade:** 8 Eckparameter minus 2 durch die
 Schwerpunkt-Nebenbedingung (Abschnitt 6) → **6** relevante DOF für die
 Entscheidung, ob \(E_{\mathrm{angle}}\) in die Optimierung eingeht.
-\(\Delta t\) ist in Phase 3 (`corners`) immer im Residualvektor.
+\(\Delta t\) ist in Phase 3 (`corners`) im Residualvektor, **sofern keine
+Fixpunkt-Bedingungen** gesetzt sind (siehe [FIXED_POINT_CONSTRAINT.md](FIXED_POINT_CONSTRAINT.md)).
 
 Aus \(\mathbf{p}\) und den fixen Z-Werten werden die Ecken-Vektoren
 \(\mathbf{c}_0, \mathbf{c}_x, \mathbf{c}_1, \mathbf{c}_y \in \mathbb{R}^3\)
@@ -272,23 +273,30 @@ mit `scipy.optimize.least_squares` (Trust-Region-Reflective).
 
 ### 7.1 Zusammensetzung
 
-Primäre Restfehler (Längen, Winkel) sind immer enthalten. Die Eck-Energien
+Primäre Restfehler (Längen, Winkel, Fixpunkte) sind immer enthalten. Die Eck-Energien
 \(w\sqrt{E_{\mathrm{angle},k}}\) werden **nur bei Unterbestimmung** angehängt
 (Rang der primären Jacobian-Matrix \(< 6\)). Die Schwerpunkt-Strafe
-\(\Delta t / \tau_t\) ist in Phase 3 **immer** enthalten.
+\(\Delta t / \tau_t\) ist in Phase 3 **nur ohne Fixpunkte** enthalten
+(siehe [FIXED_POINT_CONSTRAINT.md](FIXED_POINT_CONSTRAINT.md)).
 
 \[
 \mathbf{r}(\mathbf{p}) =
 \begin{bmatrix}
 \mathbf{r}^{\mathrm{len}} / \tau_L \\
 w \cdot \mathbf{r}^{\mathrm{ang}} / \tau_a \\
+\mathbf{r}^{\mathrm{pt}} / \tau_p \\
 \mathbf{1}_{\mathrm{rank} < 6}\,w \sqrt{E_{\mathrm{angle},c_0}(\mathbf{p})} \\
 \mathbf{1}_{\mathrm{rank} < 6}\,w \sqrt{E_{\mathrm{angle},c_x}(\mathbf{p})} \\
 \mathbf{1}_{\mathrm{rank} < 6}\,w \sqrt{E_{\mathrm{angle},c_1}(\mathbf{p})} \\
 \mathbf{1}_{\mathrm{rank} < 6}\,w \sqrt{E_{\mathrm{angle},c_y}(\mathbf{p})} \\
-\Delta t / \tau_t
+\mathbf{1}_{\neg\mathrm{fix}}\,\Delta t / \tau_t
 \end{bmatrix}.
 \]
+
+\(\mathbf{r}^{\mathrm{pt}}\): je Fixpunkt zwei Komponenten \((x(u,v)-x_s,\;
+y(u,v)-y_s)\) mit \(\tau_p = 0{,}01\,\mathrm{mm}\). Bei gesetzten Fixpunkten
+entfällt \(\Delta t\) (Translation wird hart fixiert statt weich bestraft).
+Phase 1/2 (`uniform_scale`, `uv_scale`) werden bei Fixpunkten übersprungen.
 
 **Rang-Bestimmung:** Am Startpunkt \(\mathbf{p}_0\) wird die Jacobian-Matrix
 \(J = \partial \mathbf{r}^{\mathrm{prim}} / \partial \mathbf{p}\) numerisch
@@ -296,15 +304,16 @@ gebildet (\(\mathbf{r}^{\mathrm{prim}}\) = Längen- und Winkel-Restfehler ohne
 Skalierung). Der Rang wird per SVD mit Toleranz
 \(\max(10^{-10},\,10^{-8}\,\sigma_1)\) bestimmt. Bei \(\mathrm{rank} \geq 6\)
 (gelöst oder überbestimmt in den **6 effektiven** Freiheitsgraden) entfällt
-\(E_{\mathrm{angle}}\) in der Optimierung; \(\Delta t\) bleibt aktiv. Alle
-Werte werden weiterhin im Report ausgewiesen.
+\(E_{\mathrm{angle}}\) in der Optimierung; \(\Delta t\) bleibt aktiv, sofern
+keine Fixpunkte gesetzt sind. Alle Werte werden weiterhin im Report ausgewiesen.
 
 | Symbol | Wert (Code) | Bedeutung |
 |--------|-------------|-----------|
 | \(\tau_L\) | `0.01` mm | Längen-Toleranz-Skalierung |
 | \(\tau_a\) | \(\sin(1°)\) | Winkel-Toleranz (über Sinus) |
 | \(w\) | `25.0` | Gewicht für \(\mathbf{r}^{\mathrm{ang}}/\tau_a\) und \(\sqrt{E_{\mathrm{angle},k}}\) |
-| \(\tau_t\) | `1.0` mm | Translation-Toleranz |
+| \(\tau_t\) | `1.0` mm | Translation-Toleranz (nur ohne Fixpunkte) |
+| \(\tau_p\) | `0.01` mm | Fixpunkt-Toleranz-Skalierung |
 
 Die Winkel-Restfehler \(\mathbf{r}^{\mathrm{ang}}\) werden nur angehängt, wenn
 Sketch-Constraints und `line_by_geo` übergeben werden.

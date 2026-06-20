@@ -18,6 +18,7 @@ from . import image_point_alignment as pa
 REF_LINE_ENDPOINT_SNAP_MM = 5.0
 
 _CALIB_LENGTH_TOLERANCE_MM = 0.01
+_CALIB_POINT_TOLERANCE_MM = 0.01
 _CALIB_RIGID_TRANSLATION_TOLERANCE_MM = 1.0
 _CALIB_ANGLE_TOLERANCE_RAD = np.sin(np.deg2rad(1.0))
 _CALIB_ANGLE_WEIGHT = 25.0
@@ -117,6 +118,19 @@ def _angle_residuals_for_constraints(
         if g not in line_by_geo:
             continue
         res.append(_axis_alignment_sin(line_by_geo[g], H, "v", sketch))
+    return res
+
+
+def _point_residuals_for_constraints(constraints, point_by_index, H):
+    res = []
+    for item in constraints.get("fixed_points", []):
+        pi = _constraint_point_index(item)
+        if pi not in point_by_index:
+            continue
+        pt = point_by_index[pi]
+        pos = hg._apply_homography_uv(float(pt["u"]), float(pt["v"]), H)
+        res.append(float(pos.x) - float(item["target_x_mm"]))
+        res.append(float(pos.y) - float(item["target_y_mm"]))
     return res
 
 
@@ -322,13 +336,16 @@ def _distortion_energy(params, params0, z_vals):
 
 def _primary_calibration_residuals(
         params, specs, z_vals, constraints=None, line_by_geo=None,
-        sketch=None):
-    """Length and angle constraint values only (mm / sin / dot)."""
+        sketch=None, point_by_index=None):
+    """Length, angle, and fixed-point constraint values."""
     H = hg._homography_from_xy_params(params, z_vals)
     parts = list(_length_residuals_for_specs(specs, H))
     if constraints is not None and line_by_geo is not None:
         parts.extend(_angle_residuals_for_constraints(
             constraints, line_by_geo, H, sketch=sketch))
+    if constraints is not None and point_by_index is not None:
+        parts.extend(_point_residuals_for_constraints(
+            constraints, point_by_index, H))
     if not parts:
         return np.zeros(0, dtype=float)
     return np.asarray(parts, dtype=float)
@@ -358,19 +375,18 @@ def _matrix_rank(J, rtol=_JACOBIAN_RANK_RTOL, atol=_JACOBIAN_RANK_ATOL):
 
 def _primary_constraint_rank(
         params0, specs, z_vals, constraints=None, line_by_geo=None,
-        sketch=None):
+        sketch=None, point_by_index=None):
     """Rank of primary constraint Jacobian at *params0*.
 
     Returns (rank, n_primary, include_angle_energy).
     E_angle side terms apply only when rank < effective DOF (6).
-    Centroid translation is always in the corner-calibration residual vector.
     """
 
     def func(params):
         return _primary_calibration_residuals(
             params, specs, z_vals,
             constraints=constraints, line_by_geo=line_by_geo,
-            sketch=sketch)
+            sketch=sketch, point_by_index=point_by_index)
 
     n_primary = int(func(params0).size)
     if n_primary == 0:
@@ -411,9 +427,9 @@ def _count_angle_constraints(constraints, line_by_geo):
 
 def _solver_diagnostics_meta(
         rank, n_primary, include_angle_energy, mode,
-        n_lengths=None, n_angles=None):
+        n_lengths=None, n_angles=None, include_centroid=True):
     det = _determinacy_label(rank, n_primary)
-    centroid_in_residuals = mode == "corners"
+    centroid_in_residuals = mode == "corners" and include_centroid
     return {
         "mode": mode,
         "constraint_rank": rank,
@@ -595,7 +611,8 @@ def _print_solver_diagnostics(meta=None, opt_info=None, constraints=None,
 
 def _calibration_residuals(
         params, specs, params0, z_vals, constraints=None, line_by_geo=None,
-        sketch=None, include_angle_energy=True, include_centroid=True):
+        sketch=None, point_by_index=None, include_angle_energy=True,
+        include_centroid=True):
     """Build full residual vector for corner calibration (phase 3).
 
     *include_angle_energy* (rank < 6): append w·√E_angle.
@@ -617,6 +634,12 @@ def _calibration_residuals(
                 np.asarray(angle_res, dtype=float)
                 / _CALIB_ANGLE_TOLERANCE_RAD
                 * _CALIB_ANGLE_WEIGHT)
+    if constraints is not None and point_by_index is not None:
+        point_res = _point_residuals_for_constraints(
+            constraints, point_by_index, H)
+        if point_res:
+            parts.append(
+                np.asarray(point_res, dtype=float) / _CALIB_POINT_TOLERANCE_MM)
     if include_angle_energy:
         parts.append(_angle_energy_side_residuals(params, params0, z_vals))
     if include_centroid:
@@ -735,6 +758,30 @@ def _print_calibration_constraint_report(
                 "  L{} ⊥ L{}: Abweichung {:.3f}° von 90°\n".format(
                     ga, gb, deg))
 
+    fixed_items = constraints.get("fixed_points", [])
+    point_by_index = (meta or {}).get("point_by_index") or {}
+    max_point_delta = 0.0
+    if fixed_items:
+        App.Console.PrintMessage("Fixpunkte:\n")
+        for item in fixed_items:
+            pi = _constraint_point_index(item)
+            if pi not in point_by_index:
+                App.Console.PrintWarning(
+                    "  V{}: nicht im Sketch.\n".format(pi))
+                continue
+            pt = point_by_index[pi]
+            pt_label = pt.get("label", "V{}".format(pi))
+            pos = hg._apply_homography_uv(float(pt["u"]), float(pt["v"]), H)
+            tx = float(item["target_x_mm"])
+            ty = float(item["target_y_mm"])
+            dx = float(pos.x) - tx
+            dy = float(pos.y) - ty
+            max_point_delta = max(max_point_delta, abs(dx), abs(dy))
+            App.Console.PrintMessage(
+                "  {}: Ist ({:.4f}, {:.4f}), Soll ({:.4f}, {:.4f}), "
+                "Δ ({:+.4f}, {:+.4f}) mm\n".format(
+                    pt_label, pos.x, pos.y, tx, ty, dx, dy))
+
     App.Console.PrintMessage("\nZusammenfassung:\n")
     if length_specs:
         App.Console.PrintMessage(
@@ -746,6 +793,11 @@ def _print_calibration_constraint_report(
             "  Winkel: max Abweichung = {:.3f}° "
             "(Toleranz {:.1f}°)\n".format(
                 max_angle_delta, np.degrees(np.arcsin(_CALIB_ANGLE_TOLERANCE_RAD))))
+    if max_point_delta > 0.0:
+        App.Console.PrintMessage(
+            "  Fixpunkte: max |Δ| = {:.4f} mm "
+            "(Toleranz {:.3f} mm)\n".format(
+                max_point_delta, _CALIB_POINT_TOLERANCE_MM))
     if meta is not None:
         if "exact" in meta:
             App.Console.PrintMessage(
@@ -803,25 +855,72 @@ def _max_length_error_mm(specs, H):
     return max((abs(r) for r in res), default=0.0)
 
 
-def _scale_phase_converged(specs, params, params0, z_vals):
+def _translate_params_xy(params, tx, ty):
+    out = np.asarray(params, dtype=float).copy()
+    out[0::2] += float(tx)
+    out[1::2] += float(ty)
+    return out
+
+
+def _uniform_scale_phase_params(params0, scale, tx=0.0, ty=0.0):
+    return _translate_params_xy(_uniform_scale_params(params0, scale), tx, ty)
+
+
+def _uv_scale_phase_params(params0, sx, sy, tx=0.0, ty=0.0):
+    return _translate_params_xy(_uv_scale_params(params0, sx, sy), tx, ty)
+
+
+def _max_fixed_point_error_mm(constraints, point_by_index, H):
+    res = _point_residuals_for_constraints(
+        constraints or {}, point_by_index or {}, H)
+    if not res:
+        return 0.0
+    return max(abs(float(r)) for r in res)
+
+
+def _scale_phase_converged(
+        specs, params, params0, z_vals, constraints=None, point_by_index=None):
     """True when length targets are met and corner angles are unchanged."""
     H = hg._homography_from_xy_params(params, z_vals)
     if _max_length_error_mm(specs, H) >= _CALIB_LENGTH_TOLERANCE_MM:
         return False
-    return _angle_preserving_energy(params, params0, z_vals) < 1e-6
+    if _angle_preserving_energy(params, params0, z_vals) >= 1e-6:
+        return False
+    if _has_fixed_point_constraints(constraints, point_by_index):
+        if (_max_fixed_point_error_mm(constraints, point_by_index, H)
+                >= _CALIB_POINT_TOLERANCE_MM):
+            return False
+    return True
+
+
+def _uniform_scale_phase_residuals(
+        x, specs, params_in, z_vals, constraints=None, point_by_index=None):
+    s = float(x[0])
+    tx = float(x[1]) if len(x) > 1 else 0.0
+    ty = float(x[2]) if len(x) > 2 else 0.0
+    params = _uniform_scale_phase_params(params_in, s, tx, ty)
+    H = hg._homography_from_xy_params(params, z_vals)
+    parts = [
+        r / _CALIB_LENGTH_TOLERANCE_MM
+        for r in _length_residuals_for_specs(specs, H)]
+    if _has_fixed_point_constraints(constraints, point_by_index):
+        pt_res = _point_residuals_for_constraints(
+            constraints, point_by_index, H)
+        parts.extend([r / _CALIB_POINT_TOLERANCE_MM for r in pt_res])
+    return np.asarray(parts, dtype=float)
 
 
 def _uniform_scale_length_residuals(scale, specs, params_in, z_vals):
-    params = _uniform_scale_params(params_in, scale[0])
-    H = hg._homography_from_xy_params(params, z_vals)
-    res = np.asarray(_length_residuals_for_specs(specs, H), dtype=float)
-    return res / _CALIB_LENGTH_TOLERANCE_MM
+    return _uniform_scale_phase_residuals(
+        scale, specs, params_in, z_vals)
 
 
-def _apply_uniform_scale_phase(specs, params_in, z_vals):
+def _apply_uniform_scale_phase(
+        specs, params_in, z_vals, constraints=None, point_by_index=None):
     """Phase 1: uniform scale (analytic for one length, else least_squares on s)."""
     params_in = np.asarray(params_in, dtype=float)
-    if len(specs) == 1:
+    use_fixed = _has_fixed_point_constraints(constraints, point_by_index)
+    if len(specs) == 1 and not use_fixed:
         corners = hg._corners_from_xy_params(params_in, z_vals)
         H0 = hg._homography_from_corners(*corners)
         spec = specs[0]
@@ -830,9 +929,11 @@ def _apply_uniform_scale_phase(specs, params_in, z_vals):
         if current < 1e-12:
             raise ValueError("Degenerate line for uniform scale")
         scale = float(spec["target"]) / current
-        params = _uniform_scale_params(params_in, scale)
+        params = _uniform_scale_phase_params(params_in, scale)
         info = {
             "scale_factor": scale,
+            "translation_x_mm": 0.0,
+            "translation_y_mm": 0.0,
             "analytic": True,
             "nfev": 0,
             "success": True,
@@ -840,17 +941,25 @@ def _apply_uniform_scale_phase(specs, params_in, z_vals):
         }
         return params, info
 
+    x0 = [1.0]
+    if use_fixed:
+        x0.extend([0.0, 0.0])
     result = least_squares(
-        lambda s: _uniform_scale_length_residuals(s, specs, params_in, z_vals),
-        np.array([1.0], dtype=float),
+        lambda x: _uniform_scale_phase_residuals(
+            x, specs, params_in, z_vals, constraints, point_by_index),
+        np.array(x0, dtype=float),
         ftol=_CALIB_SOLVER_FTOL,
         xtol=_CALIB_SOLVER_XTOL,
         gtol=_CALIB_SOLVER_GTOL,
         max_nfev=_CALIB_SOLVER_MAX_NFEV)
-    scale = float(result.x[0])
-    params = _uniform_scale_params(params_in, scale)
+    s = float(result.x[0])
+    tx = float(result.x[1]) if use_fixed else 0.0
+    ty = float(result.x[2]) if use_fixed else 0.0
+    params = _uniform_scale_phase_params(params_in, s, tx, ty)
     info = {
-        "scale_factor": scale,
+        "scale_factor": s,
+        "translation_x_mm": tx,
+        "translation_y_mm": ty,
         "analytic": False,
         "nfev": int(result.nfev),
         "success": bool(result.success),
@@ -861,7 +970,7 @@ def _apply_uniform_scale_phase(specs, params_in, z_vals):
 
 def _make_uniform_scale_result(
         params, params0, z_vals, specs, scale_info,
-        constraints=None, line_by_geo=None):
+        constraints=None, line_by_geo=None, point_by_index=None, sketch=None):
     corners = hg._corners_from_xy_params(params, z_vals)
     H = hg._homography_from_corners(*corners)
     length_res = _length_residuals_for_specs(specs, H)
@@ -869,9 +978,12 @@ def _make_uniform_scale_result(
     rigid = _rigid_motion_stats(params, params0, z_vals)
     move = _corner_movement_stats(params, params0)
     angle_meta = _angle_energy_report(params, params0, z_vals)
+    include_centroid = not _has_fixed_point_constraints(
+        constraints, point_by_index)
     rank, n_primary, include_trans = _primary_constraint_rank(
         params0, specs, z_vals,
-        constraints=constraints, line_by_geo=line_by_geo)
+        constraints=constraints, line_by_geo=line_by_geo, sketch=sketch,
+        point_by_index=point_by_index)
     n_angles = _count_angle_constraints(constraints, line_by_geo)
     opt_info = {
         "cost": scale_info.get("cost", 0.0),
@@ -892,17 +1004,19 @@ def _make_uniform_scale_result(
         "corners": corners,
         "corner_move": move,
         "scale_factor": scale_info["scale_factor"],
+        "point_by_index": point_by_index or {},
         **angle_meta,
         **_solver_diagnostics_meta(
             rank, n_primary, include_trans, "uniform_scale",
-            n_lengths=len(specs), n_angles=n_angles),
+            n_lengths=len(specs), n_angles=n_angles,
+            include_centroid=include_centroid),
     }
     return corners, H, opt_info, meta
 
 
 def _make_uv_scale_result(
         params, params0, z_vals, specs, uniform_info, uv_info,
-        constraints=None, line_by_geo=None):
+        constraints=None, line_by_geo=None, point_by_index=None, sketch=None):
     corners = hg._corners_from_xy_params(params, z_vals)
     H = hg._homography_from_corners(*corners)
     length_res = _length_residuals_for_specs(specs, H)
@@ -910,9 +1024,12 @@ def _make_uv_scale_result(
     rigid = _rigid_motion_stats(params, params0, z_vals)
     move = _corner_movement_stats(params, params0)
     angle_meta = _angle_energy_report(params, params0, z_vals)
+    include_centroid = not _has_fixed_point_constraints(
+        constraints, point_by_index)
     rank, n_primary, include_trans = _primary_constraint_rank(
         params0, specs, z_vals,
-        constraints=constraints, line_by_geo=line_by_geo)
+        constraints=constraints, line_by_geo=line_by_geo, sketch=sketch,
+        point_by_index=point_by_index)
     n_angles = _count_angle_constraints(constraints, line_by_geo)
     opt_info = {
         "cost": uv_info.get("cost", 0.0),
@@ -940,10 +1057,12 @@ def _make_uv_scale_result(
         "scale_sy": uv_info["scale_sy"],
         "uv_scale_success": uv_info.get("success"),
         "uv_scale_nfev": uv_info.get("nfev", 0),
+        "point_by_index": point_by_index or {},
         **angle_meta,
         **_solver_diagnostics_meta(
             rank, n_primary, include_trans, "uv_scale",
-            n_lengths=len(specs), n_angles=n_angles),
+            n_lengths=len(specs), n_angles=n_angles,
+            include_centroid=include_centroid),
     }
     if uniform_info is not None:
         meta["uniform_scale_factor"] = uniform_info.get("scale_factor")
@@ -979,28 +1098,52 @@ def _uv_scale_params(params0, sx, sy):
     return np.array(out, dtype=float)
 
 
-def _uv_scale_length_residuals(scales, specs, params0, z_vals):
-    params = _uv_scale_params(params0, scales[0], scales[1])
+def _uv_scale_phase_residuals(
+        x, specs, params0, z_vals, constraints=None, point_by_index=None):
+    sx = float(x[0])
+    sy = float(x[1])
+    tx = float(x[2]) if len(x) > 2 else 0.0
+    ty = float(x[3]) if len(x) > 3 else 0.0
+    params = _uv_scale_phase_params(params0, sx, sy, tx, ty)
     H = hg._homography_from_xy_params(params, z_vals)
-    res = np.asarray(_length_residuals_for_specs(specs, H), dtype=float)
-    return res / _CALIB_LENGTH_TOLERANCE_MM
+    parts = [
+        r / _CALIB_LENGTH_TOLERANCE_MM
+        for r in _length_residuals_for_specs(specs, H)]
+    if _has_fixed_point_constraints(constraints, point_by_index):
+        pt_res = _point_residuals_for_constraints(
+            constraints, point_by_index, H)
+        parts.extend([r / _CALIB_POINT_TOLERANCE_MM for r in pt_res])
+    return np.asarray(parts, dtype=float)
 
 
-def _apply_uv_scale_phase(specs, params_in, z_vals):
+def _uv_scale_length_residuals(scales, specs, params0, z_vals):
+    return _uv_scale_phase_residuals(scales, specs, params0, z_vals)
+
+
+def _apply_uv_scale_phase(
+        specs, params_in, z_vals, constraints=None, point_by_index=None):
     """Phase 2: independent U/V scale (2 DOF) about current quad pose."""
+    use_fixed = _has_fixed_point_constraints(constraints, point_by_index)
+    x0 = [1.0, 1.0]
+    if use_fixed:
+        x0.extend([0.0, 0.0])
     result = least_squares(
-        lambda scales: _uv_scale_length_residuals(
-            scales, specs, params_in, z_vals),
-        np.array([1.0, 1.0], dtype=float),
+        lambda x: _uv_scale_phase_residuals(
+            x, specs, params_in, z_vals, constraints, point_by_index),
+        np.array(x0, dtype=float),
         ftol=_CALIB_SOLVER_FTOL,
         xtol=_CALIB_SOLVER_XTOL,
         gtol=_CALIB_SOLVER_GTOL,
         max_nfev=_CALIB_SOLVER_MAX_NFEV)
     sx, sy = float(result.x[0]), float(result.x[1])
-    params = _uv_scale_params(params_in, sx, sy)
+    tx = float(result.x[2]) if use_fixed else 0.0
+    ty = float(result.x[3]) if use_fixed else 0.0
+    params = _uv_scale_phase_params(params_in, sx, sy, tx, ty)
     info = {
         "scale_sx": sx,
         "scale_sy": sy,
+        "translation_x_mm": tx,
+        "translation_y_mm": ty,
         "success": bool(result.success),
         "nfev": int(result.nfev),
         "cost": float(result.cost),
@@ -1016,7 +1159,7 @@ def _solve_uv_scale_phase(specs, params0, z_vals):
 
 def _solve_corner_calibration(
         specs, params0, z_vals, constraints=None, line_by_geo=None,
-        sketch=None):
+        sketch=None, point_by_index=None):
     if least_squares is None:
         raise RuntimeError("scipy is required for corner calibration")
 
@@ -1024,37 +1167,48 @@ def _solve_corner_calibration(
     allow_scale_exit = not _has_angle_constraints(constraints)
     uniform_info = None
     uv_info = None
+    include_centroid = not _has_fixed_point_constraints(
+        constraints, point_by_index)
 
     # Phase 1 — uniform (1D) scale (always)
     params_curr, uniform_info = _apply_uniform_scale_phase(
-        specs, params_curr, z_vals)
+        specs, params_curr, z_vals,
+        constraints=constraints, point_by_index=point_by_index)
     if allow_scale_exit and _scale_phase_converged(
-            specs, params_curr, params0, z_vals):
+            specs, params_curr, params0, z_vals,
+            constraints=constraints, point_by_index=point_by_index):
         return _make_uniform_scale_result(
             params_curr, params0, z_vals, specs, uniform_info,
-            constraints=constraints, line_by_geo=line_by_geo)
+            constraints=constraints, line_by_geo=line_by_geo,
+            point_by_index=point_by_index, sketch=sketch)
 
     # Phase 2 — independent U/V (2D) scale (always after phase 1)
     params_curr, uv_info = _apply_uv_scale_phase(
-        specs, params_curr, z_vals)
+        specs, params_curr, z_vals,
+        constraints=constraints, point_by_index=point_by_index)
     if allow_scale_exit and _scale_phase_converged(
-            specs, params_curr, params0, z_vals):
+            specs, params_curr, params0, z_vals,
+            constraints=constraints, point_by_index=point_by_index):
         return _make_uv_scale_result(
             params_curr, params0, z_vals, specs,
             uniform_info, uv_info,
-            constraints=constraints, line_by_geo=line_by_geo)
+            constraints=constraints, line_by_geo=line_by_geo,
+            point_by_index=point_by_index, sketch=sketch)
 
     # Phase 3 — full corner optimization
     params_start = params_curr
     rank, n_primary, include_angle = _primary_constraint_rank(
         params0, specs, z_vals,
-        constraints=constraints, line_by_geo=line_by_geo, sketch=sketch)
+        constraints=constraints, line_by_geo=line_by_geo, sketch=sketch,
+        point_by_index=point_by_index)
     n_angles = _count_angle_constraints(constraints, line_by_geo)
 
     residual_fn = lambda params: _calibration_residuals(
         params, specs, params0, z_vals,
         constraints=constraints, line_by_geo=line_by_geo, sketch=sketch,
-        include_angle_energy=include_angle)
+        point_by_index=point_by_index,
+        include_angle_energy=include_angle,
+        include_centroid=include_centroid)
 
     result = least_squares(
         residual_fn,
@@ -1120,7 +1274,9 @@ def _solve_corner_calibration(
         **angle_meta,
         **_solver_diagnostics_meta(
             rank, n_primary, include_angle, "corners",
-            n_lengths=len(specs), n_angles=n_angles),
+            n_lengths=len(specs), n_angles=n_angles,
+            include_centroid=include_centroid),
+        "point_by_index": point_by_index or {},
     }
     if uniform_info is not None:
         meta["uniform_scale_factor"] = uniform_info.get("scale_factor")
@@ -1170,8 +1326,9 @@ def compute_calibration_corners(lines, img):
 
 
 def compute_calibration_from_specs(
-        length_specs, img, constraints=None, line_by_geo=None, sketch=None):
-    """Calibrate image corners from length + optional angle constraints."""
+        length_specs, img, constraints=None, line_by_geo=None, sketch=None,
+        point_by_index=None):
+    """Calibrate image corners from length + optional angle/point constraints."""
     if not length_specs:
         raise ValueError("Mindestens 1 Soll-Länge erforderlich")
     if not image_objects.is_aligned_image(img):
@@ -1187,7 +1344,8 @@ def compute_calibration_from_specs(
 
     corners, H, opt_info, meta = _solve_corner_calibration(
         length_specs, params0, z_vals,
-        constraints=constraints, line_by_geo=line_by_geo, sketch=sketch)
+        constraints=constraints, line_by_geo=line_by_geo, sketch=sketch,
+        point_by_index=point_by_index)
     meta["specs"] = length_specs
     meta["constraints"] = constraints or {}
     return corners, H, opt_info, meta
@@ -1266,6 +1424,35 @@ def _constraint_line_pair(item):
         lb = item.get("line_b", item.get("geo_b"))
         return int(la), int(lb)
     return int(item[0]), int(item[1])
+
+
+def _constraint_point_index(item):
+    if isinstance(item, dict):
+        if "point" in item:
+            return int(item["point"])
+    return int(item)
+
+
+def _has_fixed_point_constraints(constraints, point_by_index=None):
+    items = (constraints or {}).get("fixed_points") or []
+    if not items:
+        return False
+    if not point_by_index:
+        return True
+    return any(
+        _constraint_point_index(item) in point_by_index
+        for item in items
+        if isinstance(item, dict))
+
+
+def _point_by_index_from_points_meta(points_meta):
+    out = {}
+    for i, pt in enumerate(points_meta or []):
+        key = int(pt.get("point", i))
+        out[key] = pt
+    return out
+
+
 def _line_by_index_from_lines_meta(lines_meta):
     out = {}
     for i, line in enumerate(lines_meta):
@@ -1303,6 +1490,14 @@ def _normalize_constraints_lines(constraints, n_lines):
         li = _constraint_line_index(item)
         if valid(li):
             out["vertical"].append({"line": int(li)})
+    for item in constraints.get("fixed_points", []):
+        pi = _constraint_point_index(item)
+        if 0 <= int(pi):
+            out["fixed_points"].append({
+                "point": int(pi),
+                "target_x_mm": float(item["target_x_mm"]),
+                "target_y_mm": float(item["target_y_mm"]),
+            })
     return out
 def _remap_constraint_geos(constraints, geo_map):
     if not geo_map:
@@ -1336,6 +1531,12 @@ def _remap_constraint_geos(constraints, geo_map):
     for item in constraints.get("vertical", []):
         out["vertical"].append(
             {"line": map_line(_constraint_line_index(item))})
+    for item in constraints.get("fixed_points", []):
+        out["fixed_points"].append({
+            "point": int(_constraint_point_index(item)),
+            "target_x_mm": float(item["target_x_mm"]),
+            "target_y_mm": float(item["target_y_mm"]),
+        })
     return out
 def _sketch_line_geometries(sketch):
     out = []

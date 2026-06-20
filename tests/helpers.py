@@ -5,6 +5,7 @@ import math
 import os
 
 import FreeCAD as App
+import Part
 import numpy as np
 
 from freecad.frametools import image_calibration_objects
@@ -142,22 +143,41 @@ def line_by_geo(*lines):
     return {int(line["geo"]): line for line in lines}
 
 
+def point_uv(point_idx, u, v, x=None, y=None):
+    w = vec(x or 0.0, y or 0.0) if x is not None else None
+    return {
+        "point": int(point_idx),
+        "u": float(u),
+        "v": float(v),
+        "w": w,
+        "label": "V{}".format(point_idx),
+    }
+
+
+def point_by_index(*points):
+    return {int(pt["point"]): pt for pt in points}
+
+
 def empty_constraints():
     return image_calibration_objects.default_constraints()
 
 
-def solve_corners(corners, specs, constraints=None, line_meta=None, sketch=None):
+def solve_corners(corners, specs, constraints=None, line_meta=None,
+                  point_meta=None, sketch=None):
     """Run corner calibration for synthetic geometry."""
     if constraints is None:
         constraints = empty_constraints()
     if line_meta is None:
         line_meta = line_by_geo()
+    if point_meta is None:
+        point_meta = point_by_index()
     params0 = image_tools._pack_corners_xy(corners)
     z_vals = image_tools._corner_z_values(corners)
     _, H, opt_info, meta = image_tools._solve_corner_calibration(
         specs, params0, z_vals,
         constraints=constraints,
         line_by_geo=line_meta,
+        point_by_index=point_meta,
         sketch=sketch)
     residuals = opt_info.get("residuals") or []
     max_len_err = max((abs(r) for r in residuals), default=0.0)
@@ -223,7 +243,7 @@ def make_aligned_image(doc, corners, name="AlignedImage"):
 
 def make_sketch_on_image(doc, img, name="CalibSketch"):
     sketch = doc.addObject("Sketcher::SketchObject", name)
-    sketch.Placement = image_tools._sketch_placement_from_image(img)
+    sketch.Placement = App.Placement()
     return sketch
 
 
@@ -273,3 +293,41 @@ def single_length_fixture(data, line_index=0):
         {"line": int(item["line"]), "target_mm": float(item["target_mm"])},
     ]
     return spec, constraints, line_by
+
+
+def lines_meta_with_world_from_fixture(data, img):
+    """Fixture lines + welded world endpoints on an AlignedImage."""
+    from freecad.frametools import image_point_alignment as pa
+
+    lines_meta = []
+    for i, line in enumerate(data["lines"]):
+        w0 = pa._world_on_image_uv(line["u0"], line["v0"], img)
+        w1 = pa._world_on_image_uv(line["u1"], line["v1"], img)
+        lines_meta.append({
+            "line": i,
+            "geo": int(line["geo"]),
+            "label": line.get("label", "L{}".format(i)),
+            "u0": float(line["u0"]),
+            "v0": float(line["v0"]),
+            "u1": float(line["u1"]),
+            "v1": float(line["v1"]),
+            "w0": w0,
+            "w1": w1,
+        })
+    return image_tools._weld_sketch_line_uvs(lines_meta)[0]
+
+
+def sketch_from_fixture_lines(doc, img, lines_meta):
+    """Build a calibration sketch from fixture line UVs (for vertex-order tests)."""
+    from freecad.frametools import image_point_alignment as pa
+
+    sketch = make_sketch_on_image(doc, img)
+    plm_inv = sketch.Placement.inverse()
+    for line in lines_meta:
+        w0 = pa._world_on_image_uv(line["u0"], line["v0"], img)
+        w1 = pa._world_on_image_uv(line["u1"], line["v1"], img)
+        l0 = plm_inv.multVec(w0)
+        l1 = plm_inv.multVec(w1)
+        sketch.addGeometry(Part.LineSegment(l0, l1), False)
+    doc.recompute()
+    return sketch

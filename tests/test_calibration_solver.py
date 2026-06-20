@@ -1,6 +1,7 @@
 """Tests for image calibration homography / corner solver."""
 
 import math
+import os
 import unittest
 
 import numpy as np
@@ -346,6 +347,111 @@ class TestAlignImageTest1Fixture(unittest.TestCase):
             self.assertIsNotNone(corners_new)
         finally:
             h.close_document(doc)
+
+    def test_vertex_labels_follow_sketch_wire_order(self):
+        """V0…Vn match sketch Shape vertex order (not u/v sort)."""
+        doc = h.new_document("AlignImageTest1Points")
+        try:
+            img = h.make_aligned_image(doc, self.corners0)
+            lines_meta = h.lines_meta_with_world_from_fixture(
+                self.fixture, img)
+            sketch = h.sketch_from_fixture_lines(doc, img, lines_meta)
+            points = image_tools._points_meta_from_sketch(sketch, img)
+            self.assertEqual(len(points), 4)
+            self.assertEqual(points[0]["label"], "V0")
+
+            expected_world = []
+            for local in image_tools._iter_sketch_vertex_points_local(sketch):
+                expected_world.append(
+                    image_tools._sketch_world_point(sketch, local))
+            self.assertEqual(len(expected_world), 4)
+
+            for pt, exp_w in zip(points, expected_world):
+                self.assertLess(abs(pt["w"].x - exp_w.x), 1e-3)
+                self.assertLess(abs(pt["w"].y - exp_w.y), 1e-3)
+        finally:
+            h.close_document(doc)
+
+    def test_fixpoint_V0_anchors_first_sketch_vertex(self):
+        """Fixed V0 must constrain the first wire vertex, not a swapped corner."""
+        doc = h.new_document("AlignImageTest1FixV0")
+        try:
+            img = h.make_aligned_image(doc, self.corners0)
+            lines_meta = h.lines_meta_with_world_from_fixture(
+                self.fixture, img)
+            sketch = h.sketch_from_fixture_lines(doc, img, lines_meta)
+            points = image_tools._points_meta_from_sketch(sketch, img)
+            point_by_index = {pt["point"]: pt for pt in points}
+            v0 = point_by_index[0]
+            v1 = point_by_index[1]
+
+            H0 = h.homography_from_corners(self.corners0)
+            pos0 = image_tools._apply_homography_uv(v0["u"], v0["v"], H0)
+            pos1 = image_tools._apply_homography_uv(v1["u"], v1["v"], H0)
+            target_x = float(pos0.x) + 10.0
+            target_y = float(pos0.y)
+
+            constraints = h.empty_constraints()
+            constraints["fixed_points"] = [{
+                "point": 0,
+                "target_x_mm": target_x,
+                "target_y_mm": target_y,
+            }]
+
+            H, report = h.solve_corners(
+                self.corners0, self.specs,
+                constraints=constraints,
+                line_meta=self.line_by_geo,
+                point_meta=point_by_index)
+
+            after_v0 = image_tools._apply_homography_uv(
+                v0["u"], v0["v"], H)
+            after_v1 = image_tools._apply_homography_uv(
+                v1["u"], v1["v"], H)
+
+            self.assertLess(abs(after_v0.x - target_x), h.LENGTH_TOL_MM)
+            self.assertLess(abs(after_v0.y - target_y), h.LENGTH_TOL_MM)
+            self.assertGreater(
+                abs(after_v1.x - target_x) + abs(after_v1.y - target_y),
+                abs(after_v1.x - pos1.x) + abs(after_v1.y - pos1.y) - 1.0)
+            self.assertFalse(report["include_translation_side"])
+        finally:
+            h.close_document(doc)
+
+    @unittest.skipUnless(
+        os.path.isfile(os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "example", "align_image_test_1.FCStd")),
+        "example/align_image_test_1.FCStd missing")
+    def test_vertex_labels_match_align_image_test_1_fcstd(self):
+        """Regression: V labels on real example file match Shape.Vertexes."""
+        import FreeCAD as App
+
+        fcstd = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "example", "align_image_test_1.FCStd")
+        doc = App.openDocument(fcstd)
+        try:
+            cal = doc.getObject("ImageCalibration001")
+            if cal is None:
+                cal = doc.getObject("ImageCalibration")
+            self.assertIsNotNone(cal)
+            sketch = cal.Sketch
+            source = cal.Image
+            aligned = image_tools._calibration_image_for_points(cal)
+            points = image_tools._points_meta_from_sketch(sketch, aligned)
+
+            expected = [
+                image_tools._sketch_world_point(sketch, v.Point)
+                for v in sketch.Shape.Vertexes
+            ]
+            self.assertEqual(len(points), len(expected))
+            for i, (pt, exp_w) in enumerate(zip(points, expected)):
+                self.assertEqual(pt["label"], "V{}".format(i))
+                self.assertLess(abs(pt["w"].x - exp_w.x), 1e-2)
+                self.assertLess(abs(pt["w"].y - exp_w.y), 1e-2)
+        finally:
+            App.closeDocument(doc.Name)
 
 
 class TestTwoLengthScale(unittest.TestCase):
@@ -701,6 +807,130 @@ class TestDistortionEnergyGating(unittest.TestCase):
             params0, specs, params0, z_vals,
             include_angle_energy=include_angle, include_centroid=False)
         self.assertEqual(len(r_with), len(r_no_trans) + 1)
+
+
+class TestFixedPointConstraints(unittest.TestCase):
+    """Fixed sketch nodes Pk with target world XY."""
+
+    def test_fixed_point_holds_target(self):
+        corners = h.corners_rectangle(200.0, 100.0)
+        bottom = h.line_uv(0, 0.0, 0.0, 1.0, 0.0)
+        H0 = h.homography_from_corners(corners)
+        p0 = h.corners_from_homography(H0)[0]
+        pt = h.point_uv(0, 0.0, 0.0, p0.x, p0.y)
+        constraints = h.empty_constraints()
+        constraints["fixed_points"] = [{
+            "point": 0,
+            "target_x_mm": float(p0.x),
+            "target_y_mm": float(p0.y),
+        }]
+        specs = [h.length_spec(bottom, h.length_mm(H0, bottom))]
+        H, report = h.solve_corners(
+            corners, specs, constraints=constraints,
+            line_meta=h.line_by_geo(bottom),
+            point_meta=h.point_by_index(pt))
+        pos = image_tools._apply_homography_uv(0.0, 0.0, H)
+        self.assertLess(abs(pos.x - p0.x), h.LENGTH_TOL_MM)
+        self.assertLess(abs(pos.y - p0.y), h.LENGTH_TOL_MM)
+        self.assertFalse(report["include_translation_side"])
+        self.assertEqual(report["mode"], "uniform_scale")
+
+    def test_centroid_skipped_with_fixed_point(self):
+        corners = h.corners_rectangle(200.0, 100.0)
+        bottom = h.line_uv(0, 0.0, 0.0, 1.0, 0.0)
+        H0 = h.homography_from_corners(corners)
+        p0 = h.corners_from_homography(H0)[0]
+        pt = h.point_uv(0, 0.0, 0.0, p0.x, p0.y)
+        constraints = h.empty_constraints()
+        constraints["fixed_points"] = [{
+            "point": 0,
+            "target_x_mm": float(p0.x),
+            "target_y_mm": float(p0.y),
+        }]
+        specs = [h.length_spec(bottom, h.length_mm(H0, bottom))]
+        _, report = h.solve_corners(
+            corners, specs, constraints=constraints,
+            line_meta=h.line_by_geo(bottom),
+            point_meta=h.point_by_index(pt))
+        self.assertFalse(report["include_translation_side"])
+
+    def test_fixed_point_moves_quad(self):
+        corners = h.corners_rectangle(200.0, 100.0)
+        bottom = h.line_uv(0, 0.0, 0.0, 1.0, 0.0)
+        H0 = h.homography_from_corners(corners)
+        p0 = h.corners_from_homography(H0)[0]
+        target_x = float(p0.x) + 15.0
+        target_y = float(p0.y) + 5.0
+        pt = h.point_uv(0, 0.0, 0.0, p0.x, p0.y)
+        constraints = h.empty_constraints()
+        constraints["fixed_points"] = [{
+            "point": 0,
+            "target_x_mm": target_x,
+            "target_y_mm": target_y,
+        }]
+        specs = [h.length_spec(bottom, h.length_mm(H0, bottom))]
+        H, report = h.solve_corners(
+            corners, specs, constraints=constraints,
+            line_meta=h.line_by_geo(bottom),
+            point_meta=h.point_by_index(pt))
+        pos = image_tools._apply_homography_uv(0.0, 0.0, H)
+        self.assertLess(abs(pos.x - target_x), h.LENGTH_TOL_MM)
+        self.assertLess(abs(pos.y - target_y), h.LENGTH_TOL_MM)
+        self.assertIn(report["mode"], ("uniform_scale", "uv_scale", "corners"))
+
+    def test_fixed_point_two_lengths_resolved(self):
+        """Two lengths + fixed point: scale phases include fixed-point residuals."""
+        corners = h.corners_rectangle(200.0, 100.0)
+        bottom = h.line_uv(0, 0.0, 0.0, 1.0, 0.0)
+        left = h.line_uv(1, 0.0, 0.0, 0.0, 1.0)
+        H0 = h.homography_from_corners(corners)
+        p0 = h.corners_from_homography(H0)[0]
+        target_x = float(p0.x) + 10.0
+        target_y = float(p0.y)
+        pt = h.point_uv(0, 0.0, 0.0, p0.x, p0.y)
+        constraints = h.empty_constraints()
+        constraints["fixed_points"] = [{
+            "point": 0,
+            "target_x_mm": target_x,
+            "target_y_mm": target_y,
+        }]
+        specs = [
+            h.length_spec(bottom, h.length_mm(H0, bottom)),
+            h.length_spec(left, h.length_mm(H0, left)),
+        ]
+        H, report = h.solve_corners(
+            corners, specs, constraints=constraints,
+            line_meta=h.line_by_geo(bottom, left),
+            point_meta=h.point_by_index(pt))
+        pos = image_tools._apply_homography_uv(0.0, 0.0, H)
+        self.assertLess(abs(pos.x - target_x), h.LENGTH_TOL_MM)
+        self.assertLess(abs(pos.y - target_y), h.LENGTH_TOL_MM)
+        for spec in specs:
+            err = abs(h.length_mm(H, spec) - spec["target"])
+            self.assertLess(err, h.LENGTH_TOL_MM)
+        self.assertIn(
+            report["mode"], ("uniform_scale", "uv_scale", "corners"))
+        self.assertFalse(report["include_translation_side"])
+
+
+class TestPointsMeta(unittest.TestCase):
+    def test_welded_endpoints_one_point(self):
+        lines = [
+            {
+                "u0": 0.1, "v0": 0.2, "u1": 0.5, "v1": 0.2,
+                "w0": h.vec(0, 0), "w1": h.vec(10, 0),
+            },
+            {
+                "u0": 0.1, "v0": 0.2, "u1": 0.1, "v1": 0.8,
+                "w0": h.vec(0, 0), "w1": h.vec(0, 10),
+            },
+        ]
+        points = image_tools._points_meta_from_lines_meta(lines)
+        self.assertEqual(len(points), 3)
+        shared = [
+            pt for pt in points
+            if abs(pt["u"] - 0.1) < 1e-9 and abs(pt["v"] - 0.2) < 1e-9]
+        self.assertEqual(len(shared), 1)
 
 
 if __name__ == "__main__":

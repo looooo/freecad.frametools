@@ -13,10 +13,15 @@ def default_constraints():
         "perpendicular": [],
         "horizontal": [],
         "vertical": [],
+        "fixed_points": [],
     }
 
 
 def default_lines():
+    return []
+
+
+def default_points():
     return []
 
 
@@ -47,6 +52,34 @@ def parse_lines(raw):
 
 
 def dump_lines(data):
+    return json.dumps(data, indent=2)
+
+
+def parse_points(raw):
+    if not raw:
+        return default_points()
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return default_points()
+    if not isinstance(data, list):
+        return default_points()
+    out = []
+    for i, item in enumerate(data):
+        if not isinstance(item, dict):
+            continue
+        try:
+            out.append({
+                "point": int(item.get("point", i)),
+                "u": float(item["u"]),
+                "v": float(item["v"]),
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def dump_points(data):
     return json.dumps(data, indent=2)
 
 
@@ -88,6 +121,10 @@ class ImageCalibration(object):
             "App::PropertyString", "Lines", "Constraints",
             "Kanten in Bild-UV (parametrisch, L0, L1, …)").Lines = dump_lines(
                 default_lines())
+        obj.addProperty(
+            "App::PropertyString", "Points", "Constraints",
+            "Knoten in Bild-UV (parametrisch, V0, V1, …)").Points = dump_points(
+                default_points())
         obj.Proxy = self
 
     def execute(self, obj):
@@ -192,6 +229,13 @@ def ensure_image_calibration(obj):
         obj.Constraints = dump_constraints(default_constraints())
     if not getattr(obj, "Lines", None):
         obj.Lines = dump_lines(default_lines())
+    if "Points" not in obj.PropertiesList:
+        obj.addProperty(
+            "App::PropertyString", "Points", "Constraints",
+            "Knoten in Bild-UV (parametrisch, V0, V1, …)")
+        obj.Points = dump_points(default_points())
+    elif not getattr(obj, "Points", None):
+        obj.Points = dump_points(default_points())
     if "AlignedSketch" not in obj.PropertiesList:
         obj.addProperty(
             "App::PropertyLink", "AlignedSketch", "Calibration",

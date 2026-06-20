@@ -71,7 +71,8 @@
     "parallel": [],
     "perpendicular": [],
     "horizontal": [],
-    "vertical": []
+    "vertical": [],
+    "fixed_points": []
   },
   "length_targets_mm": [
     400.0,
