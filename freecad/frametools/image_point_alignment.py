@@ -1,5 +1,7 @@
 """Point alignment: AlignedImage and homography overlay."""
 
+import os
+
 import FreeCAD as App
 import FreeCADGui as Gui
 import numpy as np
@@ -51,6 +53,54 @@ def _image_file_from_plane(plane):
     if hasattr(plane, "ImageFile"):
         return plane.ImageFile
     return ""
+
+
+def resolve_image_file_path(path, document=None):
+    """Resolve ImageFile path (absolute, document-relative, or basename in doc dir)."""
+    path = str(path or "")
+    if not path:
+        return ""
+    if os.path.isfile(path):
+        return os.path.normpath(path)
+    if document is not None and getattr(document, "FileName", None):
+        doc_dir = os.path.dirname(document.FileName)
+        for candidate in (
+                os.path.join(doc_dir, path),
+                os.path.join(doc_dir, os.path.basename(path))):
+            if os.path.isfile(candidate):
+                return os.path.normpath(candidate)
+    return ""
+
+
+def ensure_aligned_image_file(obj):
+    """Ensure AlignedImage.ImageFile points at an existing file after restore."""
+    if not image_objects.is_aligned_image(obj):
+        return ""
+    doc = getattr(obj, "Document", None)
+    resolved = resolve_image_file_path(getattr(obj, "ImageFile", ""), doc)
+    if not resolved:
+        source = getattr(obj, "SourceImage", None)
+        if source is not None:
+            resolved = resolve_image_file_path(
+                _image_file_from_plane(source), doc)
+    if resolved and str(getattr(obj, "ImageFile", "")) != resolved:
+        obj.ImageFile = resolved
+    return resolved or str(getattr(obj, "ImageFile", "") or "")
+
+
+def refresh_aligned_image_view(obj):
+    """Reload Coin texture / warp after document open or path fix."""
+    if not image_objects.is_aligned_image(obj):
+        return
+    ensure_aligned_image_file(obj)
+    _ensure_corner1_property(obj)
+    _ensure_warp_matrix(obj)
+    vobj = getattr(obj, "ViewObject", None)
+    if vobj is None or not getattr(vobj, "Proxy", None):
+        return
+    vobj.Proxy.attach(vobj)
+
+
 def _image_plane_local_corners(xsize, ysize):
     """Image::ImagePlane uses a centered local origin (see ViewProviderImagePlane)."""
     half_x = xsize / 2.0
@@ -151,6 +201,7 @@ def ensure_aligned_image(img):
     if image_objects.is_aligned_image(img):
         _ensure_corner1_property(img)
         _ensure_warp_matrix(img)
+        ensure_aligned_image_file(img)
         return img
     existing = find_aligned_image_for_source(img)
     if existing is not None:

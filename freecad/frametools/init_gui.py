@@ -7,6 +7,7 @@ except ImportError:
 import os
 from freecad.frametools import ICON_PATH
 
+
 class FrameWorkbench(Gui.Workbench):
     '''frame workbench'''
 

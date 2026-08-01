@@ -1781,7 +1781,7 @@ class ImageCalibrationConstraintsDialog(object):
         return spin
 
     def _set_dash_cell(self, row, col):
-        self.table.setItem(row, col, QtGui.QTableWidgetItem("—"))
+        self.table.setItem(row, col, QtGui.QTableWidgetItem("-"))
 
     def _load_constraints(self):
         self._building = True

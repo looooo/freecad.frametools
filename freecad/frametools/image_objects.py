@@ -402,6 +402,13 @@ class AlignedImage(object):
         if vobj and getattr(vobj, "Proxy", None):
             vobj.Proxy.updateData(obj, prop)
 
+    def onDocumentRestored(self, obj):
+        from freecad.frametools import image_point_alignment as pa
+
+        pa.ensure_aligned_image_file(obj)
+        pa._ensure_corner1_property(obj)
+        pa._ensure_warp_matrix(obj)
+
     def execute(self, obj):
         return
 
@@ -425,6 +432,7 @@ class ViewProviderAlignedImage(object):
         self.Object = vobj.Object
 
         if hasattr(self, "root") and hasattr(self, "transform"):
+            self._update_scene()
             return
 
         if hasattr(self, "root"):
@@ -486,17 +494,18 @@ class ViewProviderAlignedImage(object):
         return mode
 
     def _resolve_image_path(self):
-        path = str(self.Object.ImageFile)
-        if not path:
-            return ""
-        if os.path.isfile(path):
+        from freecad.frametools import image_point_alignment as pa
+
+        doc = self.Object.Document if self.Object else None
+        path = pa.resolve_image_file_path(
+            getattr(self.Object, "ImageFile", ""), doc)
+        if path:
             return path
-        doc = self.Object.Document
-        if doc and doc.FileName:
-            candidate = os.path.join(os.path.dirname(doc.FileName), path)
-            if os.path.isfile(candidate):
-                return candidate
-        return path
+        source = getattr(self.Object, "SourceImage", None)
+        if source is not None:
+            return pa.resolve_image_file_path(
+                pa._image_file_from_plane(source), doc)
+        return str(getattr(self.Object, "ImageFile", "") or "")
 
     def _update_scene(self):
         if not hasattr(self, "coords"):
@@ -525,7 +534,8 @@ class ViewProviderAlignedImage(object):
         return None
 
     def __setstate__(self, state):
-        return None
+        if getattr(self, "ViewObject", None):
+            self.attach(self.ViewObject)
 
 
 def is_aligned_image(obj):
