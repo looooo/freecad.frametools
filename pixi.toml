@@ -10,9 +10,11 @@ requires-pixi = ">=0.48"
 [dependencies]
 freecad = "*"
 scipy = "*"
+fonts-conda-forge = "*"
 
 [pypi-dependencies]
 "freecad.frametools" = { path = ".", editable = true }
 
 [tasks]
 tests = "freecadcmd tests/run_tests.py"
+reset-font-cache = "bash -c 'rm -rf \"$CONDA_PREFIX/var/cache/fontconfig/\"/* && fc-cache -fv'"
